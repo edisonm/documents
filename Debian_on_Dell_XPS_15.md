@@ -12,6 +12,8 @@
 - Consider to use Ventoy to create the USB installer:
   https://www.ventoy.net/en/index.html
 
+- When finish restart the computer.
+
 - The system will not be usable after the installation, most of the tutorials on
   Internet cover such issues, but they where incomplete when applied to this new
   model, therefore I will point at those fixes that I have to figure out by
@@ -108,15 +110,40 @@ a bug that makes it consume CPU resources like crazy (maybe udisks2 related).
   Bluetooth: hci0: QCA Failed to request file: qca/htbtfw20.tlv (-2)
   Bluetooth: hci0: QCA Failed to download patch (-2)
   ```
-  
-- Customizing LXDE Keyboard
+
+To get rid of the 'Sap driver initialization failed' error message:
+
+- Open /etc/systemd/system/bluetooth.target.wants/bluetooth.service
+
+- Change:
+
+  ```
+  ExecStart=/usr/lib/bluetooth/bluetoothd
+  ```
+
+  To
+
+  ```
+  ExecStart=/usr/lib/bluetooth/bluetoothd --noplugin=sap
+  ```
+
+- Reload the systemd:
+  ```
+  $ sudo systemctl daemon-reload
+  ```
+- Restart the bluetooth:
+  ```
+  $ sudo service bluetooth restart
+  ```
+
+## Customizing LXDE Keyboard
 
   If you are using your own keyboard mapping, you need to follow the next
   instructions to make it available on LXDE and on the console. Keyboard
   mappings are defined in /usr/share/X11/xkb/. In this example I created a
   customized variant of us called emacs:
 
-  - On ~/.config/autostart/, create a file called xmodmap.desktop, containing:
+- On ~/.config/autostart/, create a file called xmodmap.desktop, containing:
 
   ```
   [Desktop Entry]
@@ -135,7 +162,7 @@ a bug that makes it consume CPU resources like crazy (maybe udisks2 related).
   /usr/bin/setxkbmap -layout "us,us,es" -variant "emacs,intl,"
   ```
 
-  - modify /etc/default/keyboard:
+- modify /etc/default/keyboard:
 
   ```
   # KEYBOARD CONFIGURATION FILE
@@ -150,8 +177,6 @@ a bug that makes it consume CPU resources like crazy (maybe udisks2 related).
   BACKSPACE="guess"
   ```
   
-- Restart the computer
-
 ## Problems that still remains:
 
 - *NVIDIA Driver*: The new drivers are still not available as a debian package,
