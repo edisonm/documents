@@ -8,7 +8,13 @@
   by default is not yet fully compatible with this laptop.  Once installed, you
   should update the Kernel at least to 5.11 version, in my case I installed
   Proxmox latest version, which already provides such kernel.
-
+  
+- For dual booting, don't forget to make Linux use Local Time so they both shows
+  the same time:
+  ```
+  timedatectl set-local-rtc 1 --adjust-system-clock
+  ```
+  
 - Consider to use Ventoy to create the USB installer:
   https://www.ventoy.net/en/index.html
 
