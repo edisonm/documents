@@ -9,8 +9,8 @@
   should update the Kernel at least to 5.11 version, in my case I installed
   Proxmox latest version, which already provides such kernel.
   
-- For dual booting, don't forget to make Linux use Local Time so they both shows
-  the same time:
+- For dual booting, don't forget to make Linux use local time so both Windows
+  and Linux shows the same time:
   ```
   timedatectl set-local-rtc 1 --adjust-system-clock
   ```
