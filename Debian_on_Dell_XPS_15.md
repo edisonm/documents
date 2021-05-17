@@ -183,7 +183,7 @@ To get rid of the 'Sap driver initialization failed' error message:
   BACKSPACE="guess"
   ```
   
-## Problems that still remains:
+## Remaining problems:
 
 - *NVIDIA Driver*: The new drivers are still not available as a debian package,
   since is not urgent for me I prefer to wait until they are available.
