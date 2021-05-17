@@ -1,5 +1,4 @@
-# documents
-Tricks and tutorials to solve problems that where not solved by googling them
+# Solving non-googleable (yet) problems
 
 # **2021-05-09** [Installing Debian on Dell XPS 15](./Debian_on_Dell_XPS_15.md)
 
