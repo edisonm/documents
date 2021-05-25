@@ -229,7 +229,7 @@ config_fstab () {
 }
 
 config_init () {
-    ln -s /proc/self/mounts /etc/mtab
+    ln -sf /proc/self/mounts /etc/mtab
     apt-get update --yes
     apt-get dist-upgrade --yes
     ( echo "locales locales/locales_to_be_generated multiselect en_IE.UTF-8 UTF-8, en_US.UTF-8 UTF-8, nl_NL.UTF-8 UTF-8" ; \
@@ -251,10 +251,12 @@ config_init () {
     # os-prober is needed only on dual-boot systems:
     apt-get remove --yes --purge os-prober
     
-    apt-get install --yes btrfs-progs debconf-utils sudo linux-image-`dpkg --print-architecture` $QEMUPACK $DEBPACKS
     # printf "%s\n%s\n" "$KEY_" "$KEY_" | passwd root
     printf "%s\n%s\n${FULLNAME}\n\n\n\n\nY\n" "$KEY_" "$KEY_" | adduser $USERNAME
     usermod -aG sudo $USERNAME
+    
+    apt-get install --yes btrfs-progs debconf-utils sudo linux-image-`dpkg --print-architecture` $QEMUPACK $DEBPACKS
+
 }
 
 config_clevis_tang () {
@@ -278,13 +280,15 @@ esac
 
 copy_file script /usr/bin/clevis-decrypt-tang
 
+curl -sfg http://<TANGSERV>/adv -o /tmp/adv.jws
+clevis encrypt tang '{"url":"http://<TANGSERV>","adv":"/tmp/adv.jws"}' < /crypto_keyfile.bin > ${DESTDIR}/autounlock.key
+
 EOF
     chmod a+x /etc/initramfs-tools/hooks/clevis_tang
 }
 
 config_clevis_tpm2 () {
-    cat <<'EOF' | sed -e s:'<TANGSERV>':"$TANGSERV":g \
-                      > /etc/initramfs-tools/hooks/clevis_tpm2
+    cat <<'EOF' > /etc/initramfs-tools/hooks/clevis_tpm2
 #!/bin/sh
 
 PREREQ="clevis"
@@ -317,7 +321,6 @@ copy_exec /usr/lib/x86_64-linux-gnu/libtss2-tcti-mssim.so.0.0.0
 #     copy_exec $file
 # done
 
-curl -sfg http://<TANGSERV>/adv -o /tmp/adv.jws
 clevis encrypt tpm2 '{"key":"rsa","pcr_ids":"7"}' < /crypto_keyfile.bin > ${DESTDIR}/autounlock.key
 
 EOF
