@@ -23,7 +23,7 @@ set -e
 # Machine specific configuration:
 USERNAME=admin
 FULLNAME="Administrative Account"
-HOSTNAME=vdebian5
+HOSTNAME=debian1
 # Specifies if the machine is encrypted:
 ENCRYPT=yes
 # TANG Server, leave it empty to disable:
@@ -32,7 +32,9 @@ ENCRYPT=yes
 WITHTPM2=1
 # Extra packages you want to install, leave empty for a small footprint
 # Equivalent to live xfce4 installation + some tools
-DEBPACKS="xfce4 task-xfce-desktop xfce4-terminal acl binutils build-essential emacs firefox-esr openssh-server"
+DEBPACKS="acl binutils build-essential emacs firefox-esr openssh-server"
+#DEBPACKS+=" xfce4 task-xfce-desktop"
+DEBPACKS+=" lxde  task-lxde-desktop"
 # DEBPACKS+="acpid alsa-utils anacron binutils fcitx libreoffice"
 # APT Cache Server, leave it empty to disable:
 APTCACHER=10.8.0.1
