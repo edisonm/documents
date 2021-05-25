@@ -4,3 +4,4 @@
 
 # **2021-05-16** [Installing Proxmox on a Laptop](./Proxmox_on_Laptop.md)
 
+# **2021-05-25** [Encrypted Debian. The proper way (WIP)](./deploy.sh)
