@@ -408,7 +408,7 @@ config_noresume () {
 
 config_crypttab () {
     if [ "$ENCRYPT" == yes ] ; then
-        if [ "$TANGSERV" != "" ] || [ "$WITHTMP2" == "1" ] ; then
+        if [ "$TANGSERV" != "" ] || [ "$WITHTPM2" == "1" ] ; then
             UNLOCKFILE="/autounlock.key"
             UNLOCKOPTS=",keyscript=decrypt_clevis"
         else
@@ -448,7 +448,7 @@ inspkg_encryption () {
         if [ "$TANGSERV" != "" ] || [ "$WITHTPM2" == "1" ] ; then
             apt-get install --yes clevis
             if [ "$WITHTPM2" == "1" ] ; then
-                apt-get install clevis-tpm2
+                apt-get install --yes clevis-tpm2
             fi
         fi
     fi

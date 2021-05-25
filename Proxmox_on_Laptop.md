@@ -54,8 +54,10 @@ _mydomain.local_ the local domain and _mylaptop_ the laptop hostname:
   ```
   
   Here we are assuming that the host IP is 10.8.0.1.  hwaddress is a random
-  address that we fix beforehand. Note that we called iptables without the -o
-  option, that is to avoid problems when using external network adapters.
+  address that we fix beforehand, you can get one by commenting out such line,
+  restarting the network and copy-paste the generated one. Note that we called
+  iptables without the -o option, that is to avoid problems when using external
+  network adapters.
 
 - When editing the /etc/hosts file, use the laptop IP address in the internal
   NAT network, for instance:
