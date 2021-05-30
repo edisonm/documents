@@ -93,7 +93,7 @@ a bug that makes it consume CPU resources like crazy (maybe udisks2 related).
 
     ```
     cd ath11k-firmware
-    sudo cp QCA6390/hw2.0/1.0.1/WLAN.HST.1.0.1–01740-QCAHSTSWPLZ_V2_TO_X86–1/*.bin /lib/firmware/ath11k/QCA6390/hw2.0/
+    sudo cp QCA6390/hw2.0/1.0.1/WLAN.HST.1.0.1-01740-QCAHSTSWPLZ_V2_TO_X86-1/*.bin /lib/firmware/ath11k/QCA6390/hw2.0/
     ```
     
 ## Fixing Bluetooth
@@ -103,10 +103,12 @@ a bug that makes it consume CPU resources like crazy (maybe udisks2 related).
   attempt to use it on Linux interfere in other OS, be aware of this.
 
   In Debian you should install the package firmware-atheros, but in proxmox, due
-  to a conflict, you should get the file htbtfw20.tlv and copy it to
+  to a conflict, you should get the firmware files somewhere else and copy it to
   /lib/firmware/qca/ by hand.  It can be found here:
 
   https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git
+
+  under qca/
 
   The way I figured it out was by looking at dmesg:
 
@@ -116,6 +118,8 @@ a bug that makes it consume CPU resources like crazy (maybe udisks2 related).
   Bluetooth: hci0: QCA Failed to request file: qca/htbtfw20.tlv (-2)
   Bluetooth: hci0: QCA Failed to download patch (-2)
   ```
+
+- Install blueman
 
 To get rid of the 'Sap driver initialization failed' error message:
 

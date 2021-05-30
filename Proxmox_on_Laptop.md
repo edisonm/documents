@@ -209,7 +209,7 @@ _mydomain.local_ the local domain and _mylaptop_ the laptop hostname:
   sudo systemctl enable unbound-resolvconf
   sudo systemctl enable unbound
   ```
-  - Open as root the file /etc/NetworkManager/NetworkManager.conf and below [main]
+  - If you use NetworkManager, open as root the file /etc/NetworkManager/NetworkManager.conf and below [main]
     put this line:
     ```
     dns=unbound
@@ -222,8 +222,14 @@ _mydomain.local_ the local domain and _mylaptop_ the laptop hostname:
         domain-insecure: "mydomain.local"
     ```
     domain-insecure are the (unsigned) internal domains you are using.
+
+  - Install openresolv:
+
+    ```
+    apt install openresolv
+    ```
     
-  - In /etc/resolvconf.conf, modify the unbound_conf lines to:
+  - In /etc/resolvconf.conf, modify the unbound_conf line to:
     ```
     unbound_conf=/etc/unbound/unbound.conf.d/resolvconf_resolvers.conf
     ```
