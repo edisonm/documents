@@ -207,7 +207,8 @@ config_grub () {
         grub-install $DISK
     else
         # FOR UEFI:
-        grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=debian --recheck --no-floppy
+	# --bootloader-id=debian
+        grub-install --target=x86_64-efi --efi-directory=/boot/efi --recheck --no-floppy
     fi
 }
 
