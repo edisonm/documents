@@ -203,6 +203,7 @@ _mydomain.local_ the local domain and _mylaptop_ the laptop hostname:
 
 - On the laptop, install unbound and set it to replace systemd-resolved
   ```
+  sudo apt remove connman # this was interfering with unbound in Proxmox 7/Debian bullseye
   sudo apt install unbound
   sudo systemctl disable systemd-resolved
   sudo systemctl stop systemd-resolved

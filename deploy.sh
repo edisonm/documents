@@ -4,12 +4,12 @@ set -e
 
 # 2021-05-03 by Edison Mera
 
-# Script to automate deployment of Debian
+# Script to automate deployment of Debian 11 (bullseye)
 
-# Assumptions: this will be used in a VM of 32GB of storage, 4GB RAM, it should
+# Assumptions: this will be used in a VM of 32GB of storage, 8GB RAM, it should
 # support UEFI, the root fs will be a btrfs encrypted via LUKS, password-less
 # unlock via a key-file which is encrypted via clevis+(tang or tpm2), and
-# password input via keyboard as fail-over.  We can not use dracut since is too
+# password input via keyboard as failover.  We can not use dracut since is too
 # much hastle, and proxmox is not compatible with it yet.
 
 # Implementation guidelines:
@@ -23,18 +23,22 @@ set -e
 # Machine specific configuration:
 USERNAME=admin
 FULLNAME="Administrative Account"
-HOSTNAME=debian1
+HOSTNAME=debian2
 # Specifies if the machine is encrypted:
 ENCRYPT=yes
 # TANG Server, leave it empty to disable:
 #TANGSERV=10.8.0.2
 # Use TPM2, if available
-WITHTPM2=1
+if [ -e /dev/tpm0 ]; then
+    WITHTPM2=1
+else
+    WITHTPM2=0
+fi
 # Extra packages you want to install, leave empty for a small footprint
 # Equivalent to live xfce4 installation + some tools
 DEBPACKS="acl binutils build-essential emacs firefox-esr openssh-server"
 #DEBPACKS+=" xfce4 task-xfce-desktop"
-DEBPACKS+=" lxde  task-lxde-desktop"
+DEBPACKS+=" lxde task-lxde-desktop"
 # DEBPACKS+="acpid alsa-utils anacron binutils fcitx libreoffice"
 # APT Cache Server, leave it empty to disable:
 APTCACHER=10.8.0.1
@@ -56,11 +60,13 @@ warn_confirm () {
     YES_="$($ASKPASS_ "WARNING: This script will destroy all data on your computer, are you sure? (Type uppercase yes):")"
 
     if [ "$YES_" != "YES" ]; then
+        echo "Deployment cancelled"
         exit 1
     fi
 }
 
 config_key () {
+    echo "The master passphrase is used as failover decryption method and admin user password"
     export KEY_="$($ASKPASS_ "Master passphrase:")"
     CONFIRM_="$($ASKPASS_ "Confirm master passphrase:")"
     if [ "${KEY_}" != "${CONFIRM_}" ] ; then
@@ -116,7 +122,7 @@ build_partitions () {
 }
 
 setup_aptinstall () {
-    echo "deb http://deb.debian.org/debian buster main contrib"            > /etc/apt/sources.list
+    echo "deb http://deb.debian.org/debian bullseye main contrib"            > /etc/apt/sources.list
     # echo "deb http://deb.debian.org/debian buster-backports main contrib" >> /etc/apt/sources.list
     apt-get update --yes
     apt-get install --yes debootstrap curl
@@ -124,18 +130,18 @@ setup_aptinstall () {
 
 setup_apt () {
     cat <<'EOF' > /mnt/etc/apt/sources.list
-deb http://deb.debian.org/debian buster main contrib
-deb-src http://deb.debian.org/debian buster main contrib
+deb http://deb.debian.org/debian bullseye main contrib
+deb-src http://deb.debian.org/debian bullseye main contrib
 
-deb http://security.debian.org/debian-security buster/updates main contrib
-deb-src http://security.debian.org/debian-security buster/updates main contrib
+deb http://security.debian.org/debian-security bullseye-security main contrib
+deb-src http://security.debian.org/debian-security bullseye-security main contrib
 
-deb http://deb.debian.org/debian buster-updates main contrib
-deb-src http://deb.debian.org/debian buster-updates main contrib
+deb http://deb.debian.org/debian bullseye-updates main contrib
+deb-src http://deb.debian.org/debian bullseye-updates main contrib
 EOF
-    cat <<'EOF' > /mnt/etc/apt/sources.list.d/buster-backport.list
-deb http://deb.debian.org/debian buster-backports main contrib
-deb-src http://deb.debian.org/debian buster-backports main contrib
+    cat <<'EOF' > /mnt/etc/apt/sources.list.d/bullseye-backport.list
+deb http://deb.debian.org/debian bullseye-backports main contrib
+deb-src http://deb.debian.org/debian bullseye-backports main contrib
 EOF
 }
 
@@ -161,7 +167,7 @@ setup_hostname () {
 }
 
 unpack_debian () {
-    debootstrap buster /mnt
+    debootstrap bullseye /mnt
 }
 
 mount_partitions () {
@@ -223,41 +229,26 @@ config_fstab () {
 
     ( echo "UUID=$(blkid -s UUID -o value ${DISK}2)                            /boot/efi vfat  defaults,noatime 0 2" ; \
       echo "UUID=$(blkid -s UUID -o value ${DISK}3) /boot     ext4  defaults,noatime 0 2" ; \
-      echo "$ROOTDEV /         btrfs     subvol=@,defaults,noatime,space_cache,autodefrag 0 1" ; \
-      echo "$ROOTDEV /home     btrfs subvol=@home,defaults,noatime,space_cache,autodefrag 0 2" ; \
+      echo "$ROOTDEV /         btrfs     subvol=@,defaults,noatime,compress,space_cache,autodefrag 0 1" ; \
+      echo "$ROOTDEV /home     btrfs subvol=@home,defaults,noatime,compress,space_cache,autodefrag 0 2" ; \
       echo "$SWAPDEV none      swap  sw 0 0" ; \
       ) > /etc/fstab
 }
 
 config_init () {
-    ln -sf /proc/self/mounts /etc/mtab
-    apt-get update --yes
-    apt-get dist-upgrade --yes
-    ( echo "locales locales/locales_to_be_generated multiselect en_IE.UTF-8 UTF-8, en_US.UTF-8 UTF-8, nl_NL.UTF-8 UTF-8" ; \
-      echo "locales	locales/default_environment_locale select en_US.UTF-8" ; \
-      echo "tzdata tzdata/Areas        select Europe" ; \
-      echo "tzdata tzdata/Zones/Europe select Amsterdam" ; \
-      echo "tzdata tzdata/Zones/Etc    select UTC" ; \
-      echo "console-setup console-setup/charmap47 select UTF-8" ; \
-      echo "keyboard-configuration keyboard-configuration/layoutcode string us" ; \
-      echo "keyboard-configuration keyboard-configuration/variant    select English (US)" ; \
-      ) | debconf-set-selections -v
-    
-    apt-get install --yes locales console-setup
-    
     if [ "$(dmidecode -s system-manufacturer)" == "QEMU" ] ; then
-        QEMUPACK=qemu-guest-agent
+        apt-get install --yes qemu-guest-agent
     fi
-    dpkg-reconfigure locales tzdata keyboard-configuration console-setup -f noninteractive
     # os-prober is needed only on dual-boot systems:
     apt-get remove --yes --purge os-prober
     
     # printf "%s\n%s\n" "$KEY_" "$KEY_" | passwd root
     printf "%s\n%s\n${FULLNAME}\n\n\n\n\nY\n" "$KEY_" "$KEY_" | adduser $USERNAME
     usermod -aG sudo $USERNAME
-    
-    apt-get install --yes btrfs-progs debconf-utils sudo linux-image-`dpkg --print-architecture` $QEMUPACK $DEBPACKS
-
+    apt-get install --yes sudo
+    apt-get install --yes btrfs-progs debconf-utils linux-image-`dpkg --print-architecture`
+    echo "Installing extra packages"
+    apt-get install --yes $DEBPACKS
 }
 
 config_clevis_tang () {
@@ -326,6 +317,15 @@ clevis encrypt tpm2 '{"key":"rsa","pcr_ids":"7"}' < /crypto_keyfile.bin > ${DEST
 
 EOF
     chmod a+x /etc/initramfs-tools/hooks/clevis_tpm2
+}
+
+config_tpm_tis () {
+    # Determine wether the module tpm_tis needs to be added to initramfs-tools modules
+    if [ "`lsmod|grep tpm`" != "" ] ; then
+        if [ "`cat /etc/initramfs-tools/modules|grep tpm_tis`" == "" ] ; then
+            echo "tpm_tis" >> /etc/initramfs-tools/modules
+        fi
+    fi
 }
 
 config_clevis () {
@@ -442,6 +442,7 @@ config_encryption () {
             fi
             if [ "$WITHTPM2" == "1" ] ; then
                 config_clevis_tpm2
+                config_tpm_tis
             fi
         fi
         config_noresume
@@ -467,8 +468,26 @@ config_aptcacher () {
     fi
 }
 
+config_initpacks () {
+    ln -sf /proc/self/mounts /etc/mtab
+    apt-get update --yes
+    apt-get dist-upgrade --yes
+    ( echo "locales locales/locales_to_be_generated multiselect en_IE.UTF-8 UTF-8, en_US.UTF-8 UTF-8, nl_NL.UTF-8 UTF-8" ; \
+      echo "locales	locales/default_environment_locale select en_US.UTF-8" ; \
+      echo "tzdata tzdata/Areas        select Europe" ; \
+      echo "tzdata tzdata/Zones/Europe select Amsterdam" ; \
+      echo "tzdata tzdata/Zones/Etc    select UTC" ; \
+      echo "console-setup console-setup/charmap47 select UTF-8" ; \
+      echo "keyboard-configuration keyboard-configuration/layoutcode string us" ; \
+      echo "keyboard-configuration keyboard-configuration/variant    select English (US)" ; \
+      ) | debconf-set-selections -v
+    apt-get install --yes locales console-setup
+    dpkg-reconfigure locales tzdata keyboard-configuration console-setup -f noninteractive
+}
+
 do_chroot () {
     config_aptcacher
+    config_initpacks
     config_fstab
     config_grub
     inspkg_encryption
@@ -476,6 +495,7 @@ do_chroot () {
     config_crypttab
     update-grub
     config_init
+    update-initramfs -c -k all
 }
 
 unmount_partitions () {
