@@ -43,7 +43,16 @@ DEBPACKS+=" lxde task-lxde-desktop"
 # APT Cache Server, leave it empty to disable:
 APTCACHER=10.8.0.1
 # Unit where you will install Debian
-DISK=/dev/sda
+DISK=/dev/mmcblk0
+DISK2=${DISK}p2
+DISK3=${DISK}p3
+DISK4=${DISK}p4
+DISK5=${DISK}p5
+
+# DISK2=${DISK}2
+# DISK3=${DISK}3
+# DISK4=${DISK}4
+# DISK5=${DISK}5
 
 export DEBIAN_FRONTEND=noninteractive
 ASKPASS_='/lib/cryptsetup/askpass'
@@ -52,8 +61,8 @@ if [ "$ENCRYPT" == yes ] ; then
     ROOTPART=/dev/mapper/crypt_root
     SWAPPART=/dev/mapper/crypt_swap
 else
-    ROOTPART=${DISK}4
-    SWAPPART=${DISK}5
+    ROOTPART=${DISK4}
+    SWAPPART=${DISK5}
 fi
 
 warn_confirm () {
@@ -91,16 +100,16 @@ build_partitions () {
     sgdisk     -n5:0:0        -t5:8300 $DISK
 
     if [ "$ENCRYPT" == yes ] ; then
-        printf "%s" "$KEY_"|cryptsetup luksFormat --key-file - ${DISK}4
-        printf "%s" "$KEY_"|cryptsetup luksFormat --key-file - ${DISK}5
-        printf "%s" "$KEY_"|cryptsetup luksOpen   --key-file - ${DISK}4 crypt_root
-        printf "%s" "$KEY_"|cryptsetup luksOpen   --key-file - ${DISK}5 crypt_swap
+        printf "%s" "$KEY_"|cryptsetup luksFormat --key-file - ${DISK4}
+        printf "%s" "$KEY_"|cryptsetup luksFormat --key-file - ${DISK5}
+        printf "%s" "$KEY_"|cryptsetup luksOpen   --key-file - ${DISK4} crypt_root
+        printf "%s" "$KEY_"|cryptsetup luksOpen   --key-file - ${DISK5} crypt_swap
     fi
     
-    mkfs.ext4  -L boot ${DISK}3
+    mkfs.ext4  -L boot ${DISK3}
     mkfs.btrfs -L root $ROOTPART
     mkswap $SWAPPART
-    mkdosfs -F 32 -s 1 -n EFI ${DISK}2
+    mkdosfs -F 32 -s 1 -n EFI ${DISK2}
     
     mount $ROOTPART /mnt
     btrfs subvolume create /mnt/@
@@ -111,12 +120,12 @@ build_partitions () {
     if [ "$ENCRYPT" == yes ] ; then
         dd if=/dev/urandom bs=2048 count=1 of=/mnt/@/crypto_keyfile.bin
         chmod go-rw /mnt/@/crypto_keyfile.bin
-        printf "%s" "$KEY_"|cryptsetup luksAddKey ${DISK}4 /mnt/@/crypto_keyfile.bin --key-file -
-        printf "%s" "$KEY_"|cryptsetup luksAddKey ${DISK}5 /mnt/@/crypto_keyfile.bin --key-file -
+        printf "%s" "$KEY_"|cryptsetup luksAddKey ${DISK4} /mnt/@/crypto_keyfile.bin --key-file -
+        printf "%s" "$KEY_"|cryptsetup luksAddKey ${DISK5} /mnt/@/crypto_keyfile.bin --key-file -
     fi
 
     umount /mnt
-    mount ${DISK}3 /mnt
+    mount ${DISK3} /mnt
     mkdir /mnt/efi
     umount /mnt
 }
@@ -173,8 +182,8 @@ unpack_debian () {
 mount_partitions () {
     mount $ROOTPART /mnt -o subvol=@
     mount $ROOTPART /mnt/home -o subvol=@home
-    mount ${DISK}3 /mnt/boot
-    mount ${DISK}2 /mnt/boot/efi
+    mount ${DISK3} /mnt/boot
+    mount ${DISK2} /mnt/boot/efi
 }
 
 rbind_systemdirs () {
@@ -227,8 +236,8 @@ config_fstab () {
         SWAPDEV="UUID=$(blkid -s UUID -o value ${SWAPPART})"
     fi
 
-    ( echo "UUID=$(blkid -s UUID -o value ${DISK}2)                            /boot/efi vfat  defaults,noatime 0 2" ; \
-      echo "UUID=$(blkid -s UUID -o value ${DISK}3) /boot     ext4  defaults,noatime 0 2" ; \
+    ( echo "UUID=$(blkid -s UUID -o value ${DISK2})                            /boot/efi vfat  defaults,noatime 0 2" ; \
+      echo "UUID=$(blkid -s UUID -o value ${DISK3}) /boot     ext4  defaults,noatime 0 2" ; \
       echo "$ROOTDEV /         btrfs     subvol=@,defaults,noatime,compress,space_cache,autodefrag 0 1" ; \
       echo "$ROOTDEV /home     btrfs subvol=@home,defaults,noatime,compress,space_cache,autodefrag 0 2" ; \
       echo "$SWAPDEV none      swap  sw 0 0" ; \
@@ -424,8 +433,8 @@ config_crypttab () {
         if [ -f /etc/crypttab ] ; then
             cp /etc/crypttab /etc/crypttab-
         fi
-        ( echo "crypt_root             UUID=$(blkid -s UUID -o value ${DISK}4) ${UNLOCKFILE} luks,discard,initramfs${UNLOCKOPTS}" ; \
-          echo "crypt_swap             UUID=$(blkid -s UUID -o value ${DISK}5) /crypto_keyfile.bin luks"
+        ( echo "crypt_root             UUID=$(blkid -s UUID -o value ${DISK4}) ${UNLOCKFILE} luks,discard,initramfs${UNLOCKOPTS}" ; \
+          echo "crypt_swap             UUID=$(blkid -s UUID -o value ${DISK5}) /crypto_keyfile.bin luks"
         ) > /etc/crypttab
     fi
 }
