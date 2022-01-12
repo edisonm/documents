@@ -37,22 +37,37 @@ fi
 # Extra packages you want to install, leave empty for a small footprint
 # Equivalent to live xfce4 installation + some tools
 DEBPACKS="acl binutils build-essential emacs firefox-esr openssh-server"
-#DEBPACKS+=" xfce4 task-xfce-desktop"
+# DEBPACKS+=" xfce4 task-xfce-desktop"
 DEBPACKS+=" lxde task-lxde-desktop"
+# DEBPACKS+=" cinnamon task-cinnamon-desktop"
 # DEBPACKS+="acpid alsa-utils anacron binutils fcitx libreoffice"
 # APT Cache Server, leave it empty to disable:
-APTCACHER=10.8.0.1
+# APTCACHER=10.8.0.1
+# Disk layout: dualboot, singboot or wipeout (TBD)
+DISKLAYOUT=dualboot
 # Unit where you will install Debian
-DISK=/dev/mmcblk0
-DISK2=${DISK}p2
-DISK3=${DISK}p3
-DISK4=${DISK}p4
-DISK5=${DISK}p5
+# DISK=/dev/mmcblk0
+DISK=/dev/nvme0n1
 
-# DISK2=${DISK}2
-# DISK3=${DISK}3
-# DISK4=${DISK}4
-# DISK5=${DISK}5
+LASTCHDSK=${DISK: -1}
+
+if [ "${LASTCHDSK##[0-9]}" == "" ] ; then
+    PSEP="p"
+else
+    PSEP=""
+fi
+
+if [ "$DISKLAYOUT" == singboot ] ; then
+    PARTUEFI=${DISK}${PSEP}2
+    PARTBOOT=${DISK}${PSEP}3
+    PARTROOT=${DISK}${PSEP}4
+    PARTSWAP=${DISK}${PSEP}5
+else # dual boot
+    PARTUEFI=${DISK}${PSEP}1
+    PARTBOOT=${DISK}${PSEP}4
+    PARTROOT=${DISK}${PSEP}5
+    PARTSWAP=${DISK}${PSEP}6
+fi
 
 export DEBIAN_FRONTEND=noninteractive
 ASKPASS_='/lib/cryptsetup/askpass'
@@ -61,8 +76,8 @@ if [ "$ENCRYPT" == yes ] ; then
     ROOTPART=/dev/mapper/crypt_root
     SWAPPART=/dev/mapper/crypt_swap
 else
-    ROOTPART=${DISK4}
-    SWAPPART=${DISK5}
+    ROOTPART=${PARTROOT}
+    SWAPPART=${PARTSWAP}
 fi
 
 warn_confirm () {
@@ -85,31 +100,43 @@ config_key () {
 }
 
 build_partitions () {
-    # Partition your disk(s). This scheme works for both BIOS and UEFI, so that
-    # we can switch without resizing partitions (which is a headache):
 
-    # BIOS booting:
-    sgdisk -a1 -n1:24K:+1000K -t1:EF02 $DISK
-    # UEFI booting:
-    sgdisk     -n2:1M:+512M   -t2:EF00 $DISK
-    # Boot patition:
-    sgdisk     -n3:0:+1536M   -t3:8300 $DISK
-    # Root partition:
-    sgdisk     -n4:0:+26G     -t4:8300 $DISK
-    # SWAP partition:
-    sgdisk     -n5:0:0        -t5:8300 $DISK
+    if [ "$DISKLAYOUT" == singboot ] ; then
+        # Partition your disk(s). This scheme works for both BIOS and UEFI, so that
+        # we can switch without resizing partitions (which is a headache):
+        # BIOS booting:
+        sgdisk -a1 -n1:24K:+1000K -t1:EF02 $DISK
+        # UEFI booting:
+        sgdisk     -n2:1M:+512M   -t2:EF00 $DISK
+        # Boot patition:
+        sgdisk     -n3:0:+1536M   -t3:8300 $DISK
+        # Root partition:
+        sgdisk     -n4:0:+26G     -t4:8300 $DISK
+        # SWAP partition:
+        sgdisk     -n5:0:0        -t5:8300 $DISK
+    else
+        # Boot patition:
+        sgdisk     -n4:0:+1536M   -t3:8300 $DISK
+        # Root partition:
+        sgdisk     -n5:0:+26G     -t4:8300 $DISK
+        # SWAP partition:
+        sgdisk     -n6:0:+16G     -t5:8300 $DISK
+    fi
 
     if [ "$ENCRYPT" == yes ] ; then
-        printf "%s" "$KEY_"|cryptsetup luksFormat --key-file - ${DISK4}
-        printf "%s" "$KEY_"|cryptsetup luksFormat --key-file - ${DISK5}
-        printf "%s" "$KEY_"|cryptsetup luksOpen   --key-file - ${DISK4} crypt_root
-        printf "%s" "$KEY_"|cryptsetup luksOpen   --key-file - ${DISK5} crypt_swap
+        printf "%s" "$KEY_"|cryptsetup luksFormat --key-file - ${PARTROOT}
+        printf "%s" "$KEY_"|cryptsetup luksFormat --key-file - ${PARTSWAP}
+        printf "%s" "$KEY_"|cryptsetup luksOpen   --key-file - ${PARTROOT} crypt_root
+        printf "%s" "$KEY_"|cryptsetup luksOpen   --key-file - ${PARTSWAP} crypt_swap
     fi
     
-    mkfs.ext4  -L boot ${DISK3}
+    mkfs.ext4  -L boot ${PARTBOOT}
     mkfs.btrfs -L root $ROOTPART
     mkswap $SWAPPART
-    mkdosfs -F 32 -s 1 -n EFI ${DISK2}
+
+    if [ "$DISKLAYOUT" == wipeout ] ; then
+        mkdosfs -F 32 -s 1 -n EFI ${PARTUEFI}
+    fi
     
     mount $ROOTPART /mnt
     btrfs subvolume create /mnt/@
@@ -120,12 +147,12 @@ build_partitions () {
     if [ "$ENCRYPT" == yes ] ; then
         dd if=/dev/urandom bs=2048 count=1 of=/mnt/@/crypto_keyfile.bin
         chmod go-rw /mnt/@/crypto_keyfile.bin
-        printf "%s" "$KEY_"|cryptsetup luksAddKey ${DISK4} /mnt/@/crypto_keyfile.bin --key-file -
-        printf "%s" "$KEY_"|cryptsetup luksAddKey ${DISK5} /mnt/@/crypto_keyfile.bin --key-file -
+        printf "%s" "$KEY_"|cryptsetup luksAddKey ${PARTROOT} /mnt/@/crypto_keyfile.bin --key-file -
+        printf "%s" "$KEY_"|cryptsetup luksAddKey ${PARTSWAP} /mnt/@/crypto_keyfile.bin --key-file -
     fi
 
     umount /mnt
-    mount ${DISK3} /mnt
+    mount ${PARTBOOT} /mnt
     mkdir /mnt/efi
     umount /mnt
 }
@@ -182,8 +209,8 @@ unpack_debian () {
 mount_partitions () {
     mount $ROOTPART /mnt -o subvol=@
     mount $ROOTPART /mnt/home -o subvol=@home
-    mount ${DISK3} /mnt/boot
-    mount ${DISK2} /mnt/boot/efi
+    mount ${PARTBOOT} /mnt/boot
+    mount ${PARTUEFI} /mnt/boot/efi
 }
 
 rbind_systemdirs () {
@@ -236,8 +263,8 @@ config_fstab () {
         SWAPDEV="UUID=$(blkid -s UUID -o value ${SWAPPART})"
     fi
 
-    ( echo "UUID=$(blkid -s UUID -o value ${DISK2})                            /boot/efi vfat  defaults,noatime 0 2" ; \
-      echo "UUID=$(blkid -s UUID -o value ${DISK3}) /boot     ext4  defaults,noatime 0 2" ; \
+    ( echo "UUID=$(blkid -s UUID -o value ${PARTUEFI})                            /boot/efi vfat  defaults,noatime 0 2" ; \
+      echo "UUID=$(blkid -s UUID -o value ${PARTBOOT}) /boot     ext4  defaults,noatime 0 2" ; \
       echo "$ROOTDEV /         btrfs     subvol=@,defaults,noatime,compress,space_cache,autodefrag 0 1" ; \
       echo "$ROOTDEV /home     btrfs subvol=@home,defaults,noatime,compress,space_cache,autodefrag 0 2" ; \
       echo "$SWAPDEV none      swap  sw 0 0" ; \
@@ -433,8 +460,8 @@ config_crypttab () {
         if [ -f /etc/crypttab ] ; then
             cp /etc/crypttab /etc/crypttab-
         fi
-        ( echo "crypt_root             UUID=$(blkid -s UUID -o value ${DISK4}) ${UNLOCKFILE} luks,discard,initramfs${UNLOCKOPTS}" ; \
-          echo "crypt_swap             UUID=$(blkid -s UUID -o value ${DISK5}) /crypto_keyfile.bin luks"
+        ( echo "crypt_root             UUID=$(blkid -s UUID -o value ${PARTROOT}) ${UNLOCKFILE} luks,discard,initramfs${UNLOCKOPTS}" ; \
+          echo "crypt_swap             UUID=$(blkid -s UUID -o value ${PARTSWAP}) /crypto_keyfile.bin luks"
         ) > /etc/crypttab
     fi
 }
@@ -494,6 +521,11 @@ config_initpacks () {
     dpkg-reconfigure locales tzdata keyboard-configuration console-setup -f noninteractive
 }
 
+config_suspend () {
+    # 95% I have to disable this, even on non-server machines:
+    systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
+}
+
 do_chroot () {
     config_aptcacher
     config_initpacks
@@ -502,6 +534,7 @@ do_chroot () {
     inspkg_encryption
     config_encryption
     config_crypttab
+    config_suspend
     update-grub
     config_init
     update-initramfs -c -k all

@@ -258,3 +258,23 @@ _mydomain.local_ the local domain and _mylaptop_ the laptop hostname:
     > quit
     ```
     315576000 means 10 years, a work around to set it as a static IP
+
+  - On laptops with NVidia GPUs, if you don't plan to PCI-pass-through it, you
+    would like to enable it.  It was disabled on proxmox in favor of the nouveau
+    driver, but on my hp spectre 320, the nouveau driver was causing a crash.
+    See https://bugzilla.proxmox.com/show_bug.cgi?id=701 for more details,
+    according to it that was blocked due to a bug in kernel 4.1.3-1, but
+    currently we use kernels newer than 5.10, so it should not cause a problem
+    anymore.
+
+  - comment out 'blacklist nvidiafm' from /etc/modprobe.d/pve-blacklist.conf
+
+  - sudo apt install pve-headers
+    sudo apt install nvidia-drivers
+    sudo modprobe nvidia
+
+    to check if everything is Ok:
+
+    nvidia-settings
+    nvidia-smi
+    lsmod|grep nvidia
