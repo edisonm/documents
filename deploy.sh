@@ -23,9 +23,9 @@ set -e
 # Machine specific configuration:
 USERNAME=admin
 FULLNAME="Administrative Account"
-HOSTNAME=debian2
+HOSTNAME=pxeclient
 # Specifies if the machine is encrypted:
-ENCRYPT=yes
+# ENCRYPT=yes
 # TANG Server, leave it empty to disable:
 #TANGSERV=10.8.0.2
 # Use TPM2, if available
@@ -36,18 +36,21 @@ else
 fi
 # Extra packages you want to install, leave empty for a small footprint
 # Equivalent to live xfce4 installation + some tools
-DEBPACKS="acl binutils build-essential emacs firefox-esr openssh-server"
+DEBPACKS="acl binutils build-essential openssh-server"
+# DEBPACKS+=" emacs firefox-esr"
 # DEBPACKS+=" xfce4 task-xfce-desktop"
-DEBPACKS+=" lxde task-lxde-desktop"
+# DEBPACKS+=" lxde task-lxde-desktop"
 # DEBPACKS+=" cinnamon task-cinnamon-desktop"
-# DEBPACKS+="acpid alsa-utils anacron binutils fcitx libreoffice"
+# DEBPACKS+="acpid alsa-utils anacron fcitx libreoffice"
 # APT Cache Server, leave it empty to disable:
-# APTCACHER=10.8.0.1
+APTCACHER=10.8.0.1
 # Disk layout: dualboot, singboot or wipeout (TBD)
-DISKLAYOUT=dualboot
+# DISKLAYOUT=dualboot
+DISKLAYOUT=singboot
 # Unit where you will install Debian
 # DISK=/dev/mmcblk0
-DISK=/dev/nvme0n1
+# DISK=/dev/nvme0n1
+DISK=/dev/vda
 
 LASTCHDSK=${DISK: -1}
 
@@ -100,7 +103,6 @@ config_key () {
 }
 
 build_partitions () {
-
     if [ "$DISKLAYOUT" == singboot ] ; then
         # Partition your disk(s). This scheme works for both BIOS and UEFI, so that
         # we can switch without resizing partitions (which is a headache):
@@ -134,7 +136,7 @@ build_partitions () {
     mkfs.btrfs -L root $ROOTPART
     mkswap $SWAPPART
 
-    if [ "$DISKLAYOUT" == wipeout ] ; then
+    if [ "$DISKLAYOUT" != dualboot ] ; then
         mkdosfs -F 32 -s 1 -n EFI ${PARTUEFI}
     fi
     
@@ -195,10 +197,11 @@ setup_nic () {
 
 setup_hostname () {
     echo $HOSTNAME > /mnt/etc/hostname
-
     ( echo "127.0.0.1	localhost" ; \
+      echo "::1		localhost ip6-localhost ip6-loopback" ; \
+      echo "ff02::1		ip6-allnodes" ; \
+      echo "ff02::2		ip6-allrouters" ; \
       echo "127.0.1.1	$HOSTNAME" ; \
-      tail -n+2 /etc/hosts \
       ) > /mnt/etc/hosts
 }
 
