@@ -226,8 +226,8 @@ bind_dirs () {
     mount --bind /sys  ${ROOTDIR}/sys
     mount --bind /run  ${ROOTDIR}/run
     mount --bind /tmp  ${ROOTDIR}/tmp
-    # mount --bind ${BASEDIR}/home ${ROOTDIR}/home
-    # mount --bind ${TFTPDIR}/boot ${ROOTDIR}/boot
+    mount --bind ${BASEDIR}/home ${ROOTDIR}/home
+    mount --bind ${TFTPDIR}/boot ${ROOTDIR}/boot
 }
 
 unbind_dirs () {
@@ -236,8 +236,8 @@ unbind_dirs () {
     umount -l ${ROOTDIR}/sys
     umount -l ${ROOTDIR}/run
     umount -l ${ROOTDIR}/tmp
-    # umount -l ${ROOTDIR}/home
-    # umount -l ${ROOTDIR}/boot
+    umount -l ${ROOTDIR}/home
+    umount -l ${ROOTDIR}/boot
 }
 
 config_grubip () {
@@ -590,6 +590,7 @@ config_fstab_pxe () {
       echo "tmpfs                       /tmp  tmpfs nodev,nosuid    0  0" ; \
       echo "ovrfs                       /etc  fuse  nofail,defaults 0  0" ; \
       echo "ovrfs                       /var  fuse  nofail,defaults 0  0" ; \
+      echo "${SERVERIP}:${TFTPDIR}/boot /boot nfs   ${ROOTMODE},tcp,nolock   0  0" ; \
       echo "${SERVERIP}:${BASEDIR}/home /home nfs   rw,tcp,nolock   0  0" ; \
       ) > ${ROOTDIR}/etc/fstab
     mkdir -p ${ROOTDIR}${OVERDIR}/etc ${ROOTDIR}${OVERDIR}/var
@@ -607,7 +608,7 @@ do_chroot_pxe () {
 }
 
 settings_pxe () {
-    DESTNAME=worker5
+    DESTNAME=worker6
     NADDRESS='10.8.0'
     CLIENTIP=${NADDRESS}'.*'
     DHCPIP=${NADDRESS}'.1'
@@ -633,17 +634,15 @@ pxeserver () {
         config_chroot do_chroot_pxe
         unbind_dirs
     fi
-    config_fstab_d
     config_fstab_pxe
     config_overlay
     setup_pxe
     rm -f ${ROOTDIR}/etc/hostname ${ROOTDIR}/etc/hosts ${ROOTDIR}/etc/network/interfaces.d/*
-    mount -a -T /etc/fstab.d
     systemctl restart nfs-kernel-server
 }
 
 setup_pxe () {
-    mkdir -p /etc/fstab.d /etc/exports.d \
+    mkdir -p /etc/exports.d \
           ${TFTPDIR}/boot \
           ${TFTPDIR}/pxelinux.cfg
     
@@ -652,12 +651,10 @@ setup_pxe () {
     cp -d ${ROOTDIR}/vmlinuz                         ${TFTPDIR}/
     cp -d ${ROOTDIR}/initrd.img                      ${TFTPDIR}/
     
-    ( echo "${ROOTDIR} ${CLIENTIP}(${ROOTMODE},async,no_subtree_check,no_root_squash,no_all_squash)" ; \
+    ( echo "${TFTPDIR}/boot ${CLIENTIP}(${ROOTMODE},async,no_subtree_check,no_root_squash,no_all_squash)" ; \
+      echo "${ROOTDIR} ${CLIENTIP}(${ROOTMODE},async,no_subtree_check,no_root_squash,no_all_squash)" ; \
       echo "${BASEDIR}/home ${CLIENTIP}(rw,async,no_subtree_check)" ) \
         > /etc/exports.d/${DESTNAME}.exports
-    ( echo "${ROOTDIR}/boot ${TFTPDIR}/boot none bind,ro 0 1" ; \
-      echo "${ROOTDIR}/home ${BASEDIR}/home none bind    0 1" ) \
-        > /etc/fstab.d/${DESTNAME}.fstab
     ( echo "DEFAULT ${DESTNAME}" ; \
       echo "LABEL ${DESTNAME}" ; \
       echo "KERNEL vmlinuz" ; \
@@ -667,36 +664,26 @@ setup_pxe () {
 
 OVERDIR=/usr/local/ovrfs
 
-# Add this line to /etc/fstab on the host:
-#
-# fstab_d /etc/fstab.d fuse nofail,defaults 0 0
-
-config_fstab_d () {
-    cat <<'EOF' > /usr/local/bin/fstab_d
-#!/bin/sh
-DIR="$1"
-[ -z "${DIR}" ] && exit 1
-/bin/mount -a -T ${DIR}
-EOF
-    chmod a+rx /usr/local/bin/fstab_d
-}
-
 config_overlay () {
     # Source: https://github.com/hansrune/domoticz-contrib/blob/master/utils/mount_overlay
     cat <<'EOF' | sed -e 's:<OVERDIR>:'${OVERDIR}':g' > ${ROOTDIR}/usr/local/bin/ovrfs
 #!/bin/sh
+
+OVERDIR=<OVERDIR>
 DIR="$1"
+
 [ -z "${DIR}" ] && exit 1
 #
 # ro must be the first mount option for root .....
 #
+
 ROOT_MOUNT=$( awk '$2=="/" { print substr($4,1,2) }' /proc/mounts )
 
 if [ "$ROOT_MOUNT" = "ro" ] ; then
-    /bin/mount -t tmpfs tmpfs <OVERDIR>${DIR}
-    /bin/mkdir -p <OVERDIR>${DIR}/upper
-    /bin/mkdir -p <OVERDIR>${DIR}/work
-    OPTS="-o lowerdir=${DIR},upperdir=<OVERDIR>${DIR}/upper,workdir=<OVERDIR>${DIR}/work"
+    /bin/mount -t tmpfs tmpfs ${OVERDIR}${DIR}
+    /bin/mkdir -p ${OVERDIR}${DIR}/upper
+    /bin/mkdir -p ${OVERDIR}${DIR}/work
+    OPTS="-o lowerdir=${DIR},upperdir=${OVERDIR}${DIR}/upper,workdir=${OVERDIR}${DIR}/work"
     /bin/mount -t overlay ${OPTS} overlay ${DIR}
 fi
 
@@ -716,7 +703,7 @@ if [ "${DIR}" = "/etc" ] ; then
     }
     setup_nic () {
 	for nic in `ls /sys/class/net` ; do
-            ( echo "auto $nic"
+            ( echo "auto-hotplug $nic"
               if [ "$nic" != "lo" ] ; then
 		  echo "iface $nic inet dhcp"
               else
