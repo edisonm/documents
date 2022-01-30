@@ -14,9 +14,6 @@ set -e
 
 # Implementation guidelines:
 
-# - All must be contained in just one file, to avoid installers, packs, and
-#   complications when sending this file to the target PC.
-
 # - Questions are allowed only at the beginning, and once settled, the installer
 #   must run in a non-interactive way.
 
@@ -24,6 +21,9 @@ set -e
 USERNAME=admin
 FULLNAME="Administrative Account"
 DESTNAME=debian1
+# APT Cache Server, leave it empty to disable:
+APTCACHER=10.8.0.1
+
 # Specifies if the machine is encrypted:
 # ENCRYPT=yes
 # TANG Server, leave it empty to disable:
@@ -42,8 +42,6 @@ DEBPACKS="acl binutils build-essential openssh-server"
 # DEBPACKS+=" lxde task-lxde-desktop"
 # DEBPACKS+=" cinnamon task-cinnamon-desktop"
 # DEBPACKS+="acpid alsa-utils anacron fcitx libreoffice"
-# APT Cache Server, leave it empty to disable:
-APTCACHER=10.8.0.1
 # Disk layout: dualboot, singboot or wipeout (TBD)
 # DISKLAYOUT=dualboot
 DISKLAYOUT=singboot
@@ -55,8 +53,6 @@ DISK=/dev/vda
 ROOTDIR=${ROOTDIR:-/mnt}
 
 LASTCHDSK=${DISK: -1}
-
-ROOTMODE=ro
 
 if [ "${LASTCHDSK##[0-9]}" == "" ] ; then
     PSEP="p"
@@ -92,16 +88,6 @@ warn_confirm () {
 
     if [ "$YES_" != "YES" ]; then
         echo "Deployment cancelled"
-        exit 1
-    fi
-}
-
-config_key () {
-    echo "The master passphrase is used as failover decryption method and admin user password"
-    export KEY_="$($ASKPASS_ "New password:")"
-    CONFIRM_="$($ASKPASS_ "Retype new password:")"
-    if [ "${KEY_}" != "${CONFIRM_}" ] ; then
-        echo "ERROR: Confirmation didn't match, aborting"
         exit 1
     fi
 }
@@ -170,23 +156,6 @@ setup_aptinstall () {
     apt-get install --yes debootstrap curl
 }
 
-setup_apt () {
-    cat <<'EOF' > ${ROOTDIR}/etc/apt/sources.list
-deb http://deb.debian.org/debian bullseye main contrib
-deb-src http://deb.debian.org/debian bullseye main contrib
-
-deb http://security.debian.org/debian-security bullseye-security main contrib
-deb-src http://security.debian.org/debian-security bullseye-security main contrib
-
-deb http://deb.debian.org/debian bullseye-updates main contrib
-deb-src http://deb.debian.org/debian bullseye-updates main contrib
-EOF
-    cat <<'EOF' > ${ROOTDIR}/etc/apt/sources.list.d/bullseye-backport.list
-deb http://deb.debian.org/debian bullseye-backports main contrib
-deb-src http://deb.debian.org/debian bullseye-backports main contrib
-EOF
-}
-
 setup_nic () {
     for nic in `ls /sys/class/net` ; do
         ( echo "auto $nic"
@@ -209,35 +178,11 @@ setup_hostname () {
       ) > ${ROOTDIR}/etc/hosts
 }
 
-unpack_debian () {
-    debootstrap bullseye ${ROOTDIR}
-}
-
 mount_partitions () {
     mount ${ROOTPART} ${ROOTDIR} -o subvol=@
     mount ${ROOTPART} ${ROOTDIR}/home -o subvol=@home
     mount ${PARTBOOT} ${ROOTDIR}/boot
     mount ${PARTUEFI} ${ROOTDIR}/boot/efi
-}
-
-bind_dirs () {
-    mount --bind /dev  ${ROOTDIR}/dev
-    mount --bind /proc ${ROOTDIR}/proc
-    mount --bind /sys  ${ROOTDIR}/sys
-    mount --bind /run  ${ROOTDIR}/run
-    mount --bind /tmp  ${ROOTDIR}/tmp
-    mount --bind ${BASEDIR}/home ${ROOTDIR}/home
-    mount --bind ${TFTPDIR}/boot ${ROOTDIR}/boot
-}
-
-unbind_dirs () {
-    umount -l ${ROOTDIR}/dev
-    umount -l ${ROOTDIR}/proc
-    umount -l ${ROOTDIR}/sys
-    umount -l ${ROOTDIR}/run
-    umount -l ${ROOTDIR}/tmp
-    umount -l ${ROOTDIR}/home
-    umount -l ${ROOTDIR}/boot
 }
 
 config_grubip () {
@@ -288,22 +233,6 @@ config_fstab () {
       echo "$ROOTDEV /home     btrfs subvol=@home,defaults,noatime,compress,space_cache,autodefrag 0 2" ; \
       echo "$SWAPDEV none      swap  sw 0 0" ; \
       ) > /etc/fstab
-}
-
-config_init () {
-    if [ "$(dmidecode -s system-manufacturer)" == "QEMU" ] ; then
-        apt-get install --yes qemu-guest-agent
-    fi
-    # os-prober is needed only on dual-boot systems:
-    apt-get remove --yes --purge os-prober
-    
-    # printf "%s\n%s\n" "$KEY_" "$KEY_" | passwd root
-    printf "%s\n%s\n${FULLNAME}\n\n\n\n\nY\n" "$KEY_" "$KEY_" | adduser $USERNAME
-    usermod -aG sudo $USERNAME
-    apt-get install --yes sudo
-    apt-get install --yes btrfs-progs debconf-utils linux-image-`dpkg --print-architecture`
-    echo "Installing extra packages"
-    apt-get install --yes $DEBPACKS
 }
 
 config_clevis_tang () {
@@ -516,35 +445,6 @@ inspkg_encryption () {
     fi
 }
 
-config_aptcacher () {
-    if [ "$APTCACHER" != "" ] ; then
-        echo 'Acquire::http { Proxy "http://'${APTCACHER}':3142"; }' \
-             > ${1}/etc/apt/apt.conf.d/01proxy
-    fi
-}
-
-config_initpacks () {
-    ln -sf /proc/self/mounts /etc/mtab
-    apt-get update --yes
-    apt-get dist-upgrade --yes
-    ( echo "locales locales/locales_to_be_generated multiselect en_IE.UTF-8 UTF-8, en_US.UTF-8 UTF-8, nl_NL.UTF-8 UTF-8" ; \
-      echo "locales	locales/default_environment_locale select en_US.UTF-8" ; \
-      echo "tzdata tzdata/Areas        select Europe" ; \
-      echo "tzdata tzdata/Zones/Europe select Amsterdam" ; \
-      echo "tzdata tzdata/Zones/Etc    select UTC" ; \
-      echo "console-setup console-setup/charmap47 select UTF-8" ; \
-      echo "keyboard-configuration keyboard-configuration/layoutcode string us" ; \
-      echo "keyboard-configuration keyboard-configuration/variant    select English (US)" ; \
-      ) | debconf-set-selections -v
-    apt-get install --yes locales console-setup
-    dpkg-reconfigure locales tzdata keyboard-configuration console-setup -f noninteractive
-}
-
-config_suspend () {
-    # 95% I have to disable this, even on non-server machines:
-    systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
-}
-
 do_chroot () {
     config_aptcacher
     config_initpacks
@@ -586,249 +486,6 @@ wipeout () {
     unmount_partitions
 }
 
-config_fstab_pxe () {
-    ( echo "/dev/nfs                    /     nfs   tcp,nolock      0  0" ; \
-      echo "tmpfs                       /tmp  tmpfs nodev,nosuid    0  0" ; \
-      echo "ovrfs                       /etc  fuse  nofail,defaults 0  0" ; \
-      echo "ovrfs                       /var  fuse  nofail,defaults 0  0" ; \
-      echo "${SERVERIP}:${TFTPDIR}/boot /boot nfs   ${ROOTMODE},tcp,nolock   0  0" ; \
-      echo "${SERVERIP}:${BASEDIR}/home /home nfs   rw,tcp,nolock   0  0" ; \
-      ) > ${ROOTDIR}/etc/fstab
-    mkdir -p ${ROOTDIR}${OVERDIR}/etc ${ROOTDIR}${OVERDIR}/var
-}
-
-do_chroot_pxe () {
-    config_initpacks
-    apt-get install --yes nfs-common fuse lsof
-    # apt-get --yes purge connman
-    # apt-get --yes autoremove
-    config_suspend
-    config_init
-    update-initramfs -c -k all
-}
-
-settings_pxe () {
-    DESTNAME=worker6
-    NADDRESS='10.8.0'
-    CLIENTIP=${NADDRESS}'.*'
-    DHCPIP=${NADDRESS}'.1'
-    SERVERIPS=`hostname -I`
-    SERVERIP=`( for i in ${SERVERIPS} ; do echo ${i} ; done ) | grep ${NADDRESS}`
-    BASEDIR=/srv/nfs4/pxe/${DESTNAME}
-    ROOTDIR=${BASEDIR}/root
-    if [ ! -f /etc/default/tftpd-hpa ] ; then
-        apt install tftpd-hpa
-    fi
-    TFTPROOT=`grep TFTP_DIRECTORY /etc/default/tftpd-hpa|sed 's/TFTP_DIRECTORY=\"\(.*\)\"/\1/g'`
-    TFTPDIR=${TFTPROOT}/${DESTNAME}
-}
-
-config_vmlinuz () {
-    cat <<'EOF' > ${ROOTDIR}/etc/initramfs-tools/hooks/vmlinuz
-#!/bin/sh
-
-PREREQ=""
-prereqs() {
-    echo "$PREREQ"
-}
-case "$1" in
-    prereqs)
-	prereqs
-	exit 0
-	;;
-esac
-
-. /usr/share/initramfs-tools/hook-functions
-# Begin real processing below this line
-
-ln -sf vmlinuz-${version} /boot/vmlinuz
-ln -sf initrd.img-${version} /boot/initrd.img
-
-EOF
-    chmod a+x ${ROOTDIR}/etc/initramfs-tools/hooks/vmlinuz
-}
-
-pxeserver () {
-    settings_pxe
-    
-    if [ -d ${ROOTDIR} ] ; then
-        FIRST=0
-    else
-        FIRST=1
-    fi
-
-    mkdir -p ${ROOTDIR}/etc/apt ${BASEDIR}/home ${TFTPDIR}/boot
-    config_aptcacher ${ROOTDIR}
-    setup_apt
-    config_vmlinuz
-    
-    if [ "${FIRST}" == 1 ] ; then
-        config_key
-        unpack_debian
-        bind_dirs
-        config_chroot do_chroot_pxe
-        unbind_dirs
-    fi
-    
-    config_fstab_pxe
-    config_overlay
-    setup_pxe
-    rm -f ${ROOTDIR}/etc/hostname ${ROOTDIR}/etc/hosts ${ROOTDIR}/etc/network/interfaces.d/*
-    systemctl restart nfs-kernel-server
-}
-
-setup_pxe () {
-    mkdir -p /etc/exports.d \
-          ${TFTPDIR}/boot \
-          ${TFTPDIR}/pxelinux.cfg
-    
-    ln -f /usr/lib/PXELINUX/pxelinux.0               ${TFTPDIR}/pxelinux.0
-    ln -f /usr/lib/syslinux/modules/bios/ldlinux.c32 ${TFTPDIR}/ldlinux.c32
-    ln -f /usr/lib/syslinux/modules/bios/menu.c32    ${TFTPDIR}/menu.c32
-    ln -f /usr/lib/syslinux/modules/bios/libutil.c32 ${TFTPDIR}/libutil.c32
-    
-    RELEASE="$(echo `lsb_release -irs`)"
-    
-    ( echo "${TFTPDIR}/boot ${CLIENTIP}(${ROOTMODE},async,no_subtree_check,no_root_squash,no_all_squash)" ; \
-      echo "${ROOTDIR} ${CLIENTIP}(${ROOTMODE},async,no_subtree_check,no_root_squash,no_all_squash)" ; \
-      echo "${BASEDIR}/home ${CLIENTIP}(rw,async,no_subtree_check)" ) \
-        > /etc/exports.d/${DESTNAME}.exports
-    
-    cat <<'EOF' | sed -e s:'<DESTNAME>':"${DESTNAME}":g \
-                      -e s:'<RELEASE>':"${RELEASE}":g \
-                      -e s:'<SERVERIP>':"${SERVERIP}":g \
-                      -e s:'<ROOTDIR>':"${ROOTDIR}":g \
-                      -e s:'<ROOTMODE>':"${ROOTMODE}":g \
-                      > ${TFTPDIR}/pxelinux.cfg/default
-DEFAULT menu.c32
-TIMEOUT 50
-ONTIMEOUT RELEASE
-PROMPT 0
-
-MENU TITLE  PXE Server <DESTNAME>
-NOESCAPE 1
-ALLOWOPTIONS 1
-PROMPT 0
-
-menu color border       37;44 #ffffffff #00000000 std
-menu background         37;44
-menu color screen       37;44
-menu color title	* #FFFFFFFF *
-menu color border	* #00000000 #00000000 none
-menu color sel		* #ffffffff #76a1d0ff *
-menu color hotsel	1;7;37;44 #ffffffff #76a1d0ff *
-menu color tabmsg	37;44
-menu color help		37;44 #ffdddd00 #00000000 none
-# XXX When adjusting vshift, take care that rows is set to a small
-# enough value so any possible menu will fit on the screen,
-# rather than falling off the bottom.
-menu vshift 3
-# menu vshift 4
-# menu rows 14
-# # The help line must be at least one line from the bottom.
-# menu helpmsgrow 14
-# # The command line must be at least one line from the help line.
-# menu cmdlinerow 16
-# menu timeoutrow 16
-# menu tabmsgrow 18
-menu tabmsg Press ENTER to boot or TAB to edit a menu entry
-
-NOESCAPE 1
-
-LABEL RELEASE
-MENU LABEL <RELEASE>
-KERNEL boot/vmlinuz
-APPEND ip=dhcp root=/dev/nfs nfsroot=<SERVERIP>:<ROOTDIR> <ROOTMODE> initrd=boot/initrd.img raid=noautodetect quiet splash ipv6.disable=1
-
-MENU BEGIN Advanced options for <RELEASE>
-MENU TITLE Advanced options for <RELEASE>
-EOF
-
-    LABEL=1
-    for VERSION in `cd ${TFTPDIR}/boot;ls vmlinuz-*|sed -e s:vmlinuz-::g|sort -r` ; do
-        cat <<'EOF' | sed -e s:'<DESTNAME>':"${DESTNAME}":g \
-                          -e s:'<RELEASE>':"${RELEASE}":g \
-                          -e s:'<SERVERIP>':"${SERVERIP}":g \
-                          -e s:'<ROOTDIR>':"${ROOTDIR}":g \
-                          -e s:'<ROOTMODE>':"${ROOTMODE}":g \
-                          -e s:'<VERSION>':"${VERSION}":g \
-                          -e s:'<LABEL>':"${LABEL}":g \
-                          >> ${TFTPDIR}/pxelinux.cfg/default
-
-LABEL <LABEL>
-MENU LABEL Linux <VERSION>
-KERNEL boot/vmlinuz-<VERSION>
-APPEND ip=dhcp root=/dev/nfs nfsroot=<SERVERIP>:<ROOTDIR> <ROOTMODE> initrd=boot/initrd.img-<VERSION> raid=noautodetect quiet splash ipv6.disable=1
-
-LABEL <LABEL>r
-MENU LABEL Linux <VERSION> (recovery mode)
-KERNEL boot/vmlinuz-<VERSION>
-APPEND ip=dhcp root=/dev/nfs nfsroot=<SERVERIP>:<ROOTDIR> <ROOTMODE> single initrd=boot/initrd.img-<VERSION> raid=noautodetect quiet splash ipv6.disable=1
-
-EOF
-        LABEL=$(($LABEL+1))
-    done
-    echo "MENU END" >> ${TFTPDIR}/pxelinux.cfg/default
-}
-
-OVERDIR=/usr/local/ovrfs
-
-config_overlay () {
-    # Source: https://github.com/hansrune/domoticz-contrib/blob/master/utils/mount_overlay
-    cat <<'EOF' | sed -e 's:<OVERDIR>:'${OVERDIR}':g' > ${ROOTDIR}/usr/local/bin/ovrfs
-#!/bin/sh
-
-OVERDIR=<OVERDIR>
-DIR="$1"
-
-[ -z "${DIR}" ] && exit 1
-#
-# ro must be the first mount option for root .....
-#
-
-ROOT_MOUNT=$( awk '$2=="/" { print substr($4,1,2) }' /proc/mounts )
-
-if [ "$ROOT_MOUNT" = "ro" ] ; then
-    /bin/mount -t tmpfs tmpfs ${OVERDIR}${DIR}
-    /bin/mkdir -p ${OVERDIR}${DIR}/upper
-    /bin/mkdir -p ${OVERDIR}${DIR}/work
-    OPTS="-o lowerdir=${DIR},upperdir=${OVERDIR}${DIR}/upper,workdir=${OVERDIR}${DIR}/work"
-    /bin/mount -t overlay ${OPTS} overlay ${DIR}
-fi
-
-if [ "${DIR}" = "/etc" ] ; then
-    # As soon as /etc is writable, fix hostname and nic:
-    setup_hostname () {
-	ipaddr=`hostname -I`
-	fqdn=`hostname -f`
-	hostname=`hostname`
-	echo ${hostname} > /etc/hostname
-	( echo "127.0.0.1	localhost" ; \
-	  echo "::1		localhost ip6-localhost ip6-loopback" ; \
-	  echo "ff02::1		ip6-allnodes" ; \
-	  echo "ff02::2		ip6-allrouters" ; \
-	  echo "${ipaddr} ${fqdn} ${hostname}" ; \
-	  ) > /etc/hosts
-    }
-    setup_nic () {
-	for nic in `ls /sys/class/net` ; do
-            ( echo "auto-hotplug $nic"
-              if [ "$nic" != "lo" ] ; then
-		  echo "iface $nic inet dhcp"
-              else
-		  echo "iface $nic inet loopback"
-              fi
-            ) > /etc/network/interfaces.d/$nic
-	done
-    }
-
-    setup_hostname
-    setup_nic
-fi
-EOF
-    chmod a+rx ${ROOTDIR}/usr/local/bin/ovrfs
-}
-
 # vmdesktop () {
     
 # }
@@ -845,34 +502,8 @@ EOF
 # phserver () {
 # }
 
-case $1 in
-    wipeout)
-        wipeout
-        ;;
-    pxeserver)
-        pxeserver
-        ;;
-    do_chroot_pxe)
-        do_chroot_pxe
-        ;;
-    do_chroot)
-        do_chroot
-        ;;
-    bind_dirs)
-        settings_pxe
-        bind_dirs
-        ;;
-    unbind_dirs)
-        settings_pxe
-        unbind_dirs
-        ;;
-    config_chroot_pxe)
-        settings_pxe
-        bind_dirs
-        config_chroot do_chroot_pxe
-        unbind_dirs        
-        ;;
-    *)
-        echo "Usage: $0 all|pxeserver"
-        ;;
-esac
+if [ $# = 0 ] ; then
+    wipeout
+else
+    $*
+fi
