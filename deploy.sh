@@ -4,7 +4,7 @@ set -e
 
 # 2021-05-03 by Edison Mera
 
-# Script to automate deployment of Debian 11 (bullseye)
+# Script to automate deployment of Debian 11 (bullseye) in several scenarios
 
 # Assumptions: this will be used in a VM of 32GB of storage, 8GB RAM, it should
 # support UEFI, the root fs will be a btrfs encrypted via LUKS, password-less
@@ -214,8 +214,8 @@ unpack_debian () {
 }
 
 mount_partitions () {
-    mount $ROOTPART   ${ROOTDIR} -o subvol=@
-    mount $ROOTPART   ${ROOTDIR}/home -o subvol=@home
+    mount ${ROOTPART} ${ROOTDIR} -o subvol=@
+    mount ${ROOTPART} ${ROOTDIR}/home -o subvol=@home
     mount ${PARTBOOT} ${ROOTDIR}/boot
     mount ${PARTUEFI} ${ROOTDIR}/boot/efi
 }
@@ -275,8 +275,8 @@ config_grub () {
 
 config_fstab () {
     if [ "$ENCRYPT" == yes ] ; then
-        ROOTDEV="$ROOTPART                   "
-        SWAPDEV="$SWAPPART                   "
+        ROOTDEV="${ROOTPART}                   "
+        SWAPDEV="${SWAPPART}                   "
     else
         ROOTDEV="UUID=$(blkid -s UUID -o value ${ROOTPART})"
         SWAPDEV="UUID=$(blkid -s UUID -o value ${SWAPPART})"
@@ -519,7 +519,7 @@ inspkg_encryption () {
 config_aptcacher () {
     if [ "$APTCACHER" != "" ] ; then
         echo 'Acquire::http { Proxy "http://'${APTCACHER}':3142"; }' \
-             > /etc/apt/apt.conf.d/01proxy
+             > ${1}/etc/apt/apt.conf.d/01proxy
     fi
 }
 
@@ -578,6 +578,7 @@ wipeout () {
     mount_partitions
     unpack_debian
     setup_apt
+    config_aptcacher ${ROOTDIR}
     setup_hostname
     setup_nic
     bind_dirs
@@ -597,7 +598,6 @@ config_fstab_pxe () {
 }
 
 do_chroot_pxe () {
-    config_aptcacher
     config_initpacks
     apt-get install --yes nfs-common fuse lsof
     # apt-get --yes purge connman
@@ -623,17 +623,53 @@ settings_pxe () {
     TFTPDIR=${TFTPROOT}/${DESTNAME}
 }
 
+config_vmlinuz () {
+    cat <<'EOF' > ${ROOTDIR}/etc/initramfs-tools/hooks/vmlinuz
+#!/bin/sh
+
+PREREQ=""
+prereqs() {
+    echo "$PREREQ"
+}
+case "$1" in
+    prereqs)
+	prereqs
+	exit 0
+	;;
+esac
+
+. /usr/share/initramfs-tools/hook-functions
+# Begin real processing below this line
+
+ln -sf vmlinuz-${version} /boot/vmlinuz
+ln -sf initrd.img-${version} /boot/initrd.img
+
+EOF
+    chmod a+x ${ROOTDIR}/etc/initramfs-tools/hooks/vmlinuz
+}
+
 pxeserver () {
     settings_pxe
-    if [ ! -d ${ROOTDIR} ] ; then
+    
+    if [ -d ${ROOTDIR} ] ; then
+        FIRST=0
+    else
+        FIRST=1
+    fi
+
+    mkdir -p ${ROOTDIR}/etc/apt ${BASEDIR}/home ${TFTPDIR}/boot
+    config_aptcacher ${ROOTDIR}
+    setup_apt
+    config_vmlinuz
+    
+    if [ "${FIRST}" == 1 ] ; then
         config_key
-        mkdir -p ${ROOTDIR} ${BASEDIR}/home ${TFTPDIR}/boot
         unpack_debian
-        setup_apt
         bind_dirs
         config_chroot do_chroot_pxe
         unbind_dirs
     fi
+    
     config_fstab_pxe
     config_overlay
     setup_pxe
@@ -648,18 +684,91 @@ setup_pxe () {
     
     ln -f /usr/lib/PXELINUX/pxelinux.0               ${TFTPDIR}/pxelinux.0
     ln -f /usr/lib/syslinux/modules/bios/ldlinux.c32 ${TFTPDIR}/ldlinux.c32
-    cp -d ${ROOTDIR}/vmlinuz                         ${TFTPDIR}/
-    cp -d ${ROOTDIR}/initrd.img                      ${TFTPDIR}/
+    ln -f /usr/lib/syslinux/modules/bios/menu.c32    ${TFTPDIR}/menu.c32
+    ln -f /usr/lib/syslinux/modules/bios/libutil.c32 ${TFTPDIR}/libutil.c32
+    
+    RELEASE="$(echo `lsb_release -irs`)"
     
     ( echo "${TFTPDIR}/boot ${CLIENTIP}(${ROOTMODE},async,no_subtree_check,no_root_squash,no_all_squash)" ; \
       echo "${ROOTDIR} ${CLIENTIP}(${ROOTMODE},async,no_subtree_check,no_root_squash,no_all_squash)" ; \
       echo "${BASEDIR}/home ${CLIENTIP}(rw,async,no_subtree_check)" ) \
         > /etc/exports.d/${DESTNAME}.exports
-    ( echo "DEFAULT ${DESTNAME}" ; \
-      echo "LABEL ${DESTNAME}" ; \
-      echo "KERNEL vmlinuz" ; \
-      echo "APPEND ip=dhcp root=/dev/nfs nfsroot=${SERVERIP}:${ROOTDIR} ${ROOTMODE} initrd=initrd.img raid=noautodetect quiet splash ipv6.disable=1" \
-      ) > ${TFTPDIR}/pxelinux.cfg/default
+    
+    cat <<'EOF' | sed -e s:'<DESTNAME>':"${DESTNAME}":g \
+                      -e s:'<RELEASE>':"${RELEASE}":g \
+                      -e s:'<SERVERIP>':"${SERVERIP}":g \
+                      -e s:'<ROOTDIR>':"${ROOTDIR}":g \
+                      -e s:'<ROOTMODE>':"${ROOTMODE}":g \
+                      > ${TFTPDIR}/pxelinux.cfg/default
+DEFAULT menu.c32
+TIMEOUT 50
+ONTIMEOUT RELEASE
+PROMPT 0
+
+MENU TITLE  PXE Server <DESTNAME>
+NOESCAPE 1
+ALLOWOPTIONS 1
+PROMPT 0
+
+menu color border       37;44 #ffffffff #00000000 std
+menu background         37;44
+menu color screen       37;44
+menu color title	* #FFFFFFFF *
+menu color border	* #00000000 #00000000 none
+menu color sel		* #ffffffff #76a1d0ff *
+menu color hotsel	1;7;37;44 #ffffffff #76a1d0ff *
+menu color tabmsg	37;44
+menu color help		37;44 #ffdddd00 #00000000 none
+# XXX When adjusting vshift, take care that rows is set to a small
+# enough value so any possible menu will fit on the screen,
+# rather than falling off the bottom.
+menu vshift 3
+# menu vshift 4
+# menu rows 14
+# # The help line must be at least one line from the bottom.
+# menu helpmsgrow 14
+# # The command line must be at least one line from the help line.
+# menu cmdlinerow 16
+# menu timeoutrow 16
+# menu tabmsgrow 18
+menu tabmsg Press ENTER to boot or TAB to edit a menu entry
+
+NOESCAPE 1
+
+LABEL RELEASE
+MENU LABEL <RELEASE>
+KERNEL boot/vmlinuz
+APPEND ip=dhcp root=/dev/nfs nfsroot=<SERVERIP>:<ROOTDIR> <ROOTMODE> initrd=boot/initrd.img raid=noautodetect quiet splash ipv6.disable=1
+
+MENU BEGIN Advanced options for <RELEASE>
+MENU TITLE Advanced options for <RELEASE>
+EOF
+
+    LABEL=1
+    for VERSION in `cd ${TFTPDIR}/boot;ls vmlinuz-*|sed -e s:vmlinuz-::g|sort -r` ; do
+        cat <<'EOF' | sed -e s:'<DESTNAME>':"${DESTNAME}":g \
+                          -e s:'<RELEASE>':"${RELEASE}":g \
+                          -e s:'<SERVERIP>':"${SERVERIP}":g \
+                          -e s:'<ROOTDIR>':"${ROOTDIR}":g \
+                          -e s:'<ROOTMODE>':"${ROOTMODE}":g \
+                          -e s:'<VERSION>':"${VERSION}":g \
+                          -e s:'<LABEL>':"${LABEL}":g \
+                          >> ${TFTPDIR}/pxelinux.cfg/default
+
+LABEL <LABEL>
+MENU LABEL Linux <VERSION>
+KERNEL boot/vmlinuz-<VERSION>
+APPEND ip=dhcp root=/dev/nfs nfsroot=<SERVERIP>:<ROOTDIR> <ROOTMODE> initrd=boot/initrd.img-<VERSION> raid=noautodetect quiet splash ipv6.disable=1
+
+LABEL <LABEL>r
+MENU LABEL Linux <VERSION> (recovery mode)
+KERNEL boot/vmlinuz-<VERSION>
+APPEND ip=dhcp root=/dev/nfs nfsroot=<SERVERIP>:<ROOTDIR> <ROOTMODE> single initrd=boot/initrd.img-<VERSION> raid=noautodetect quiet splash ipv6.disable=1
+
+EOF
+        LABEL=$(($LABEL+1))
+    done
+    echo "MENU END" >> ${TFTPDIR}/pxelinux.cfg/default
 }
 
 OVERDIR=/usr/local/ovrfs
