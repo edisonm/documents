@@ -31,14 +31,18 @@ pxeserver () {
     fi
 
     mkdir -p ${ROOTDIR}/etc/apt ${BASEDIR}/home ${TFTPDIR}/boot
-    config_aptcacher ${ROOTDIR}
     setup_apt
+    config_aptcacher ${ROOTDIR}
     config_vmlinuz
     
     if [ "${FIRST}" == 1 ] ; then
         config_key
+        mount_partitions
         unpack_debian
-        config_chroot_pxe
+        bind_dirs
+        config_chroot do_chroot_pxe
+        unbind_dirs
+        unmount_partitions
     fi
     
     config_fstab_pxe
@@ -48,10 +52,14 @@ pxeserver () {
     systemctl restart nfs-kernel-server
 }
 
-config_chroot_pxe () {
-    bind_dirs
-    config_chroot do_chroot_pxe
-    unbind_dirs
+mount_partitions () {
+    mount --bind ${BASEDIR}/home ${ROOTDIR}/home
+    mount --bind ${TFTPDIR}/boot ${ROOTDIR}/boot
+}
+
+unmount_partitions () {
+    umount -l ${ROOTDIR}/home
+    umount -l ${ROOTDIR}/boot
 }
 
 setup_pxe () {

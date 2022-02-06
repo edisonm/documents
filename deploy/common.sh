@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e
+
 config_key () {
     echo "The master passphrase is used as failover decryption method and admin user password"
     export KEY_="$($ASKPASS_ "New password:")"
@@ -16,8 +18,6 @@ bind_dirs () {
     mount --bind /sys  ${ROOTDIR}/sys
     mount --bind /run  ${ROOTDIR}/run
     mount --bind /tmp  ${ROOTDIR}/tmp
-    mount --bind ${BASEDIR}/home ${ROOTDIR}/home
-    mount --bind ${TFTPDIR}/boot ${ROOTDIR}/boot
 }
 
 unbind_dirs () {
@@ -26,8 +26,6 @@ unbind_dirs () {
     umount -l ${ROOTDIR}/sys
     umount -l ${ROOTDIR}/run
     umount -l ${ROOTDIR}/tmp
-    umount -l ${ROOTDIR}/home
-    umount -l ${ROOTDIR}/boot
 }
 
 config_aptcacher () {

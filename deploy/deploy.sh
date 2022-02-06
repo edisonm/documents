@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e
+. `dirname $0`/common.sh
 
 # 2021-05-03 by Edison Mera
 
@@ -18,9 +18,9 @@ set -e
 #   must run in a non-interactive way.
 
 # Machine specific configuration:
-USERNAME=admin
-FULLNAME="Administrative Account"
-DESTNAME=debian1
+USERNAME=edison
+FULLNAME="Edison Mera"
+DESTNAME=gitlab
 # APT Cache Server, leave it empty to disable:
 APTCACHER=10.8.0.1
 
@@ -44,7 +44,9 @@ DEBPACKS="acl binutils build-essential openssh-server"
 # DEBPACKS+="acpid alsa-utils anacron fcitx libreoffice"
 # Disk layout: dualboot, singboot or wipeout (TBD)
 # DISKLAYOUT=dualboot
-DISKLAYOUT=singboot
+# DISKLAYOUT=singboot
+DISKLAYOUT=wipeout
+
 # Unit where you will install Debian
 # DISK=/dev/mmcblk0
 # DISK=/dev/nvme0n1
@@ -75,7 +77,7 @@ fi
 export DEBIAN_FRONTEND=noninteractive
 ASKPASS_='/lib/cryptsetup/askpass'
 
-if [ "$ENCRYPT" == yes ] ; then
+if [ "${ENCRYPT}" == yes ] ; then
     ROOTPART=/dev/mapper/crypt_root
     SWAPPART=/dev/mapper/crypt_swap
 else
@@ -92,20 +94,29 @@ warn_confirm () {
     fi
 }
 
+singboot_partitions () {
+    # Partition your disk(s). This scheme works for both BIOS and UEFI, so that
+    # we can switch without resizing partitions (which is a headache):
+    # BIOS booting:
+    sgdisk -a1 -n1:24K:+1000K -t1:EF02 $DISK
+    # UEFI booting:
+    sgdisk     -n2:1M:+512M   -t2:EF00 $DISK
+    # Boot patition:
+    sgdisk     -n3:0:+1536M   -t3:8300 $DISK
+    # Root partition:
+    sgdisk     -n4:0:+26G     -t4:8300 $DISK
+    # SWAP partition:
+    sgdisk     -n5:0:0        -t5:8300 $DISK
+}
+
 build_partitions () {
+    if [ "$DISKLAYOUT" == wipeout ] ; then
+        # First, wipeout the disk:
+        sgdisk -o $DISK
+        singboot_partitions
+    fi
     if [ "$DISKLAYOUT" == singboot ] ; then
-        # Partition your disk(s). This scheme works for both BIOS and UEFI, so that
-        # we can switch without resizing partitions (which is a headache):
-        # BIOS booting:
-        sgdisk -a1 -n1:24K:+1000K -t1:EF02 $DISK
-        # UEFI booting:
-        sgdisk     -n2:1M:+512M   -t2:EF00 $DISK
-        # Boot patition:
-        sgdisk     -n3:0:+1536M   -t3:8300 $DISK
-        # Root partition:
-        sgdisk     -n4:0:+26G     -t4:8300 $DISK
-        # SWAP partition:
-        sgdisk     -n5:0:0        -t5:8300 $DISK
+        singboot_partitions
     else
         # Boot patition:
         sgdisk     -n4:0:+1536M   -t3:8300 $DISK
@@ -115,28 +126,33 @@ build_partitions () {
         sgdisk     -n6:0:+16G     -t5:8300 $DISK
     fi
 
-    if [ "$ENCRYPT" == yes ] ; then
+    if [ "${ENCRYPT}" == yes ] ; then
         printf "%s" "$KEY_"|cryptsetup luksFormat --key-file - ${PARTROOT}
         printf "%s" "$KEY_"|cryptsetup luksFormat --key-file - ${PARTSWAP}
         printf "%s" "$KEY_"|cryptsetup luksOpen   --key-file - ${PARTROOT} crypt_root
         printf "%s" "$KEY_"|cryptsetup luksOpen   --key-file - ${PARTSWAP} crypt_swap
     fi
+
+    if [ "$DISKLAYOUT" == wipeout ] ; then
+        FORCEEXT4="-F"
+        FORCBTRFS="-f"
+    fi
     
-    mkfs.ext4  -L boot ${PARTBOOT}
-    mkfs.btrfs -L root $ROOTPART
-    mkswap $SWAPPART
+    mkfs.ext4  ${FORCEEXT4} -L boot ${PARTBOOT}
+    mkfs.btrfs ${FORCBTRFS} -L root ${ROOTPART}
+    mkswap ${SWAPPART}
 
     if [ "$DISKLAYOUT" != dualboot ] ; then
         mkdosfs -F 32 -s 1 -n EFI ${PARTUEFI}
     fi
     
-    mount $ROOTPART ${ROOTDIR}
+    mount ${ROOTPART} ${ROOTDIR}
     btrfs subvolume create ${ROOTDIR}/@
     mkdir ${ROOTDIR}/@/home
     mkdir ${ROOTDIR}/@/boot
     btrfs subvolume create ${ROOTDIR}/@home
 
-    if [ "$ENCRYPT" == yes ] ; then
+    if [ "${ENCRYPT}" == yes ] ; then
         dd if=/dev/urandom bs=2048 count=1 of=${ROOTDIR}/@/crypto_keyfile.bin
         chmod go-rw ${ROOTDIR}/@/crypto_keyfile.bin
         printf "%s" "$KEY_"|cryptsetup luksAddKey ${PARTROOT} ${ROOTDIR}/@/crypto_keyfile.bin --key-file -
@@ -153,7 +169,7 @@ setup_aptinstall () {
     echo "deb http://deb.debian.org/debian bullseye main contrib"            > /etc/apt/sources.list
     # echo "deb http://deb.debian.org/debian buster-backports main contrib" >> /etc/apt/sources.list
     apt-get update --yes
-    apt-get install --yes debootstrap curl
+    apt-get install --yes debootstrap curl net-tools efibootmgr
 }
 
 setup_nic () {
@@ -185,41 +201,39 @@ mount_partitions () {
     mount ${PARTUEFI} ${ROOTDIR}/boot/efi
 }
 
+unmount_partitions () {
+    umount -l ${ROOTDIR}/boot/efi
+    umount -l ${ROOTDIR}/boot
+    umount -l ${ROOTDIR}/home
+    umount -l ${ROOTDIR}
+}
+
 config_grubip () {
-    cp /etc/default/grub /tmp/
-    sed -e 's/GRUB_CMDLINE_LINUX=""/GRUB_CMDLINE_LINUX="'"ip=$IP::$GW:$MK"'"/g' /tmp/grub \
-        > /etc/default/grub
+    if [ "${ENCRYPT}" == yes ] && [ "$TANGSERV" != "" ] ; then
+        IP=$(hostname -I|awk '{print $1}')
+        GW=$(ip route|awk '/default/{print $3}')
+        cp ${ROOTDIR}/etc/default/grub /tmp/
+        # in some systems, in /etc/default/grub, a line like this could be required:
+        sed -e 's/GRUB_CMDLINE_LINUX=""/GRUB_CMDLINE_LINUX="'"ip=$IP::$GW:$MK"'"/g' /tmp/grub \
+            > ${ROOTDIR}/etc/default/grub
+    fi
 }
 
 config_grub () {
-    # in some systems, in /etc/default/grub, a line like this could be required:
-    apt-get install --yes net-tools efibootmgr
-    IP=$(hostname -I|awk '{print $1}')
-    MK=$(/sbin/ifconfig|awk '/'$IP'/{print $4}')
-    GW=$(ip route|awk '/default/{print $3}')
-    EFI_=$(efibootmgr -q && echo 1 || echo 0)
-    if [ "$EFI_" == "0" ]; then
-        apt-get install --yes grub-pc
-    else
-        apt-get install --yes grub-efi-amd64 shim-signed
-    fi
-
-    if [ "$ENCRYPT" == yes ] && [ "$TANGSERV" != "" ] ; then
-        config_grubip
-    fi
-    
     if [ "$EFI_" == "0" ]; then
         # FOR BIOS:
+        apt-get install --yes grub-pc
         grub-install $DISK
     else
         # FOR UEFI:
+        apt-get install --yes grub-efi-amd64 shim-signed
 	# --bootloader-id=debian
         grub-install --target=x86_64-efi --efi-directory=/boot/efi --recheck --no-floppy
     fi
 }
 
 config_fstab () {
-    if [ "$ENCRYPT" == yes ] ; then
+    if [ "${ENCRYPT}" == yes ] ; then
         ROOTDEV="${ROOTPART}                   "
         SWAPDEV="${SWAPPART}                   "
     else
@@ -397,7 +411,7 @@ config_noresume () {
 }
 
 config_crypttab () {
-    if [ "$ENCRYPT" == yes ] ; then
+    if [ "${ENCRYPT}" == yes ] ; then
         if [ "$TANGSERV" != "" ] || [ "$WITHTPM2" == "1" ] ; then
             UNLOCKFILE="/autounlock.key"
             UNLOCKOPTS=",keyscript=decrypt_clevis"
@@ -415,12 +429,11 @@ config_crypttab () {
 }
 
 config_encryption () {
-    if [ "$ENCRYPT" == yes ] ; then
+    if [ "${ENCRYPT}" == yes ] ; then
         if [ "$TANGSERV" != "" ] || [ "$WITHTPM2" == "1" ] ; then
             config_decrypt_clevis
             config_clevis
             if [ "$TANGSERV" != "" ] ; then
-                config_grubip
                 config_clevis_network
                 config_clevis_tang
             fi
@@ -434,7 +447,7 @@ config_encryption () {
 }
 
 inspkg_encryption () {
-    if [ "$ENCRYPT" == yes ] ; then
+    if [ "${ENCRYPT}" == yes ] ; then
         apt-get install --yes cryptsetup
         if [ "$TANGSERV" != "" ] || [ "$WITHTPM2" == "1" ] ; then
             apt-get install --yes clevis
@@ -459,12 +472,9 @@ do_chroot () {
     update-initramfs -c -k all
 }
 
-unmount_partitions () {
-    umount -l -R ${ROOTDIR}
-}
-
 config_chroot () {
-    cp $0 ${ROOTDIR}/tmp/
+    cp deploy.sh common.sh ${ROOTDIR}/tmp/
+    EFI_=$(efibootmgr -q && echo 1 || echo 0)
     chroot ${ROOTDIR} /tmp/deploy.sh $*
 }
 
@@ -482,7 +492,9 @@ wipeout () {
     setup_hostname
     setup_nic
     bind_dirs
+    config_grubip
     config_chroot do_chroot
+    unbind_dirs
     unmount_partitions
 }
 
