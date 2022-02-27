@@ -20,7 +20,7 @@
 # Machine specific configuration:
 USERNAME=edison
 FULLNAME="Edison Mera"
-DESTNAME=gitlab
+DESTNAME=debian
 # APT Cache Server, leave it empty to disable:
 APTCACHER=10.8.0.1
 
@@ -42,37 +42,14 @@ DEBPACKS="acl binutils build-essential openssh-server"
 # DEBPACKS+=" lxde task-lxde-desktop"
 # DEBPACKS+=" cinnamon task-cinnamon-desktop"
 # DEBPACKS+="acpid alsa-utils anacron fcitx libreoffice"
-# Disk layout: dualboot, singboot or wipeout (TBD)
+
+# Disk layout:
 # DISKLAYOUT=dualboot
 # DISKLAYOUT=singboot
-DISKLAYOUT=wipeout
-
-# Unit where you will install Debian
-# DISK=/dev/mmcblk0
-# DISK=/dev/nvme0n1
-DISK=/dev/vda
+# DISKLAYOUT=wipeout
+DISKLAYOUT=raid10
 
 ROOTDIR=${ROOTDIR:-/mnt}
-
-LASTCHDSK=${DISK: -1}
-
-if [ "${LASTCHDSK##[0-9]}" == "" ] ; then
-    PSEP="p"
-else
-    PSEP=""
-fi
-
-if [ "$DISKLAYOUT" == singboot ] ; then
-    PARTUEFI=${DISK}${PSEP}2
-    PARTBOOT=${DISK}${PSEP}3
-    PARTROOT=${DISK}${PSEP}4
-    PARTSWAP=${DISK}${PSEP}5
-else # dual boot
-    PARTUEFI=${DISK}${PSEP}1
-    PARTBOOT=${DISK}${PSEP}4
-    PARTROOT=${DISK}${PSEP}5
-    PARTSWAP=${DISK}${PSEP}6
-fi
 
 export DEBIAN_FRONTEND=noninteractive
 ASKPASS_='/lib/cryptsetup/askpass'
@@ -94,37 +71,121 @@ warn_confirm () {
     fi
 }
 
-singboot_partitions () {
+make_bootefipar () {
     # Partition your disk(s). This scheme works for both BIOS and UEFI, so that
     # we can switch without resizing partitions (which is a headache):
     # BIOS booting:
-    sgdisk -a1 -n1:24K:+1000K -t1:EF02 $DISK
+    sgdisk -a1 -n1:24K:+1000K -t1:EF02 $1
     # UEFI booting:
-    sgdisk     -n2:1M:+512M   -t2:EF00 $DISK
+    sgdisk     -n2:1M:+512M   -t2:EF00 $1
+}
+
+make_partitions () {
     # Boot patition:
-    sgdisk     -n3:0:+1536M   -t3:8300 $DISK
+    sgdisk     -n3:0:+1536M   -t3:8300 $1
     # Root partition:
-    sgdisk     -n4:0:+26G     -t4:8300 $DISK
+    sgdisk     -n4:0:$2       -t4:8300 $1
     # SWAP partition:
-    sgdisk     -n5:0:0        -t5:8300 $DISK
+    sgdisk     -n5:0:$3       -t5:8300 $1
+}
+
+setenv_singboot () {
+    # Unit where you will install Debian
+    # DISK=/dev/mmcblk0
+    # DISK=/dev/nvme0n1
+    DISK=/dev/vda
+    PSEP=`psep ${DISK}`
+    PARTUEFI=${DISK}${PSEP}${SUFFUEFI}
+    PARTBOOT=${DISK}${PSEP}${SUFFBOOT}
+    PARTROOT=${DISK}${PSEP}${SUFFROOT}
+    PARTSWAP=${DISK}${PSEP}${SUFFSWAP}
+}
+
+singboot_partitions () {
+    SUFFUEFI=2
+    SUFFBOOT=3
+    SUFFROOT=4
+    SUFFSWAP=5
+    setenv_singboot
+    make_bootefipar $DISK
+    make_partitions $DISK +26G +4G
+}
+
+wipeout_partitions () {
+    SUFFUEFI=2
+    SUFFBOOT=3
+    SUFFROOT=4
+    SUFFSWAP=5
+    setenv_singboot
+    # First, wipeout the disk:
+    sgdisk -o $DISK
+    make_bootefipar $DISK
+    make_partitions $DISK +26G +4G
+}
+
+dualboot_partitions () {
+    SUFFUEFI=1
+    SUFFBOOT=4
+    SUFFROOT=5
+    SUFFSWAP=6
+    setenv_singboot
+    make_partitions ${DISK} +26G +4G
+}
+
+psep () {
+    LASTCHDSK=${1: -1}
+    if [ "${LASTCHDSK##[0-9]}" == "" ] ; then
+         echo "p"
+    fi
+}
+
+raid10_partitions () {
+    DISK1=/dev/sda
+    DISK2=/dev/sdb
+    DISK3=/dev/sdc
+    DISK4=/dev/sdd
+    
+    PARTBOOT=/dev/md0
+    PARTROOT=/dev/md1
+    PARTSWAP=/dev/md2
+    
+    sgdisk -o $DISK1
+    sgdisk -o $DISK2
+    sgdisk -o $DISK3
+    sgdisk -o $DISK4
+    
+    make_partitions $DISK1 +32G +4G
+    make_partitions $DISK2 +32G +4G
+    make_partitions $DISK3 +32G +4G
+    make_partitions $DISK4 +32G +4G
+    
+    PSEP1=`psep $DISK1`
+    PSEP2=`psep $DISK2`
+    PSEP3=`psep $DISK3`
+    PSEP4=`psep $DISK4`
+    
+    PARTBOOT1=${DISK1}${PSEP1}3
+    PARTBOOT2=${DISK2}${PSEP2}3
+    PARTBOOT3=${DISK3}${PSEP3}3
+    PARTBOOT4=${DISK4}${PSEP4}3
+    
+    PARTROOT1=${DISK1}${PSEP1}4
+    PARTROOT2=${DISK2}${PSEP2}4
+    PARTROOT3=${DISK3}${PSEP3}4
+    PARTROOT4=${DISK4}${PSEP4}4
+    
+    PARTSWAP1=${DISK1}${PSEP1}5
+    PARTSWAP2=${DISK2}${PSEP2}5
+    PARTSWAP3=${DISK3}${PSEP3}5
+    PARTSWAP4=${DISK4}${PSEP4}5
+    
+    mdadm --create ${PARTBOOT} --level raid10 --metadata=1.0 --raid-devices 4 $PARTBOOT1 $PARTBOOT2 $PARTBOOT3 $PARTBOOT4
+    mdadm --create ${PARTROOT} --level raid10 --raid-devices 4 $PARTROOT1 $PARTROOT2 $PARTROOT3 $PARTROOT4
+    mdadm --create ${PARTSWAP} --level raid0  --raid-devices 4 $PARTSWAP1 $PARTSWAP2 $PARTSWAP3 $PARTSWAP4
 }
 
 build_partitions () {
-    if [ "$DISKLAYOUT" == wipeout ] ; then
-        # First, wipeout the disk:
-        sgdisk -o $DISK
-        singboot_partitions
-    fi
-    if [ "$DISKLAYOUT" == singboot ] ; then
-        singboot_partitions
-    else
-        # Boot patition:
-        sgdisk     -n4:0:+1536M   -t3:8300 $DISK
-        # Root partition:
-        sgdisk     -n5:0:+26G     -t4:8300 $DISK
-        # SWAP partition:
-        sgdisk     -n6:0:+16G     -t5:8300 $DISK
-    fi
+    ${DISKLAYOUT}_partitions
 
     if [ "${ENCRYPT}" == yes ] ; then
         printf "%s" "$KEY_"|cryptsetup luksFormat --key-file - ${PARTROOT}
@@ -133,7 +194,7 @@ build_partitions () {
         printf "%s" "$KEY_"|cryptsetup luksOpen   --key-file - ${PARTSWAP} crypt_swap
     fi
 
-    if [ "$DISKLAYOUT" == wipeout ] ; then
+    if [ "$DISKLAYOUT" == wipeout ] || [ "$DISKLAYOUT" == raid10 ] ; then
         FORCEEXT4="-F"
         FORCBTRFS="-f"
     fi
