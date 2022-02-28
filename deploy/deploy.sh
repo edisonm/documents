@@ -150,11 +150,18 @@ raid10_partitions () {
     SUFFROOT=4
     SUFFSWAP=5
 
+    DISKBOOT=/dev/md0
+    DISKROOT=/dev/md1
+    DISKSWAP=/dev/md2
+
+    SUFFMD=1
+
+    PARTBOOT=${DISKBOOT}`psep ${DISKBOOT}`${SUFFMD}
+    PARTROOT=${DISKROOT}`psep ${DISKROOT}`${SUFFMD}
+    PARTSWAP=${DISKSWAP}`psep ${DISKSWAP}`${SUFFMD}
+
     # Pick one, later you can sync the other copies
     PARTUEFI=${DISK1}${PSEP}${SUFFUEFI}
-    PARTBOOT=/dev/md0
-    PARTROOT=/dev/md1
-    PARTSWAP=/dev/md2
     
     sgdisk -o $DISK1
     sgdisk -o $DISK2
@@ -189,6 +196,10 @@ raid10_partitions () {
     mdadm --create ${PARTBOOT} --level raid10 --metadata=1.0 --raid-devices 4 $PARTBOOT1 $PARTBOOT2 $PARTBOOT3 $PARTBOOT4
     mdadm --create ${PARTROOT} --level raid10 --raid-devices 4 $PARTROOT1 $PARTROOT2 $PARTROOT3 $PARTROOT4
     mdadm --create ${PARTSWAP} --level raid0  --raid-devices 4 $PARTSWAP1 $PARTSWAP2 $PARTSWAP3 $PARTSWAP4
+
+    sgdisk -n1:0:0 -t1:8300 $DISKBOOT
+    sgdisk -n1:0:0 -t1:8300 $DISKROOT
+    sgdisk -n1:0:0 -t1:8300 $DISKSWAP
 }
 
 build_partitions () {
