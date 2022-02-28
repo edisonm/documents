@@ -2,7 +2,7 @@
 
 . `dirname $0`/common.sh
 
-set -x
+# set -x
 
 # 2021-05-03 by Edison Mera
 
@@ -24,14 +24,14 @@ USERNAME=admin
 FULLNAME="Administrative Account"
 DESTNAME=luna
 # APT Cache Server, leave it empty to disable:
-# APTCACHER=10.8.0.1
+APTCACHER=10.8.0.1
 
 # Specifies if the machine is encrypted:
 ENCRYPT=yes
 # TANG Server, leave it empty to disable:
 # TANGSERV=10.8.0.2
 # Use TPM2, if available
-if [ -e /dev/tpm0 ]; then
+if [ -e /dev/tpm0 ] && [ "`cat /sys/class/tpm/tpm0/tpm_version_major`" == "2" ] ; then
     WITHTPM2=1
 else
     WITHTPM2=0
@@ -48,8 +48,8 @@ DEBPACKS="acl binutils build-essential openssh-server"
 # Disk layout:
 # DISKLAYOUT=dualboot
 # DISKLAYOUT=singboot
-DISKLAYOUT=wipeout
-# DISKLAYOUT=raid10
+# DISKLAYOUT=wipeout
+DISKLAYOUT=raid10
 
 ROOTDIR=${ROOTDIR:-/mnt}
 
@@ -80,11 +80,13 @@ make_bootefipar () {
     sgdisk -a1 -n1:24K:+1000K -t1:EF02 $1
     # UEFI booting:
     sgdisk     -n2:1M:+512M   -t2:EF00 $1
+
+    mkdosfs -F 32 -s 1 -n EFI ${1}`psep ${1}`${SUFFUEFI}
 }
 
 make_partitions () {
     # Boot patition:
-    sgdisk     -n3:0:+1536M   -t3:8300 $1
+    sgdisk     -n3:0:+2G      -t3:8300 $1
     # Root partition:
     sgdisk     -n4:0:$2       -t4:8300 $1
     # SWAP partition:
@@ -154,6 +156,27 @@ setenv_raid10 () {
 
     # Pick one, later you can sync the other copies
     PARTUEFI=${DISK1}${PSEP}${SUFFUEFI}
+
+    PSEP1=`psep $DISK1`
+    PSEP2=`psep $DISK2`
+    PSEP3=`psep $DISK3`
+    PSEP4=`psep $DISK4`
+    
+    PARTBOOT1=${DISK1}${PSEP1}${SUFFBOOT}
+    PARTBOOT2=${DISK2}${PSEP2}${SUFFBOOT}
+    PARTBOOT3=${DISK3}${PSEP3}${SUFFBOOT}
+    PARTBOOT4=${DISK4}${PSEP4}${SUFFBOOT}
+    
+    PARTROOT1=${DISK1}${PSEP1}${SUFFROOT}
+    PARTROOT2=${DISK2}${PSEP2}${SUFFROOT}
+    PARTROOT3=${DISK3}${PSEP3}${SUFFROOT}
+    PARTROOT4=${DISK4}${PSEP4}${SUFFROOT}
+    
+    PARTSWAP1=${DISK1}${PSEP1}${SUFFSWAP}
+    PARTSWAP2=${DISK2}${PSEP2}${SUFFSWAP}
+    PARTSWAP3=${DISK3}${PSEP3}${SUFFSWAP}
+    PARTSWAP4=${DISK4}${PSEP4}${SUFFSWAP}
+
 }
 
 setenv_${DISKLAYOUT}
@@ -195,26 +218,6 @@ raid10_partitions () {
     make_partitions $DISK3 +32G +4G
     make_partitions $DISK4 +32G +4G
     
-    PSEP1=`psep $DISK1`
-    PSEP2=`psep $DISK2`
-    PSEP3=`psep $DISK3`
-    PSEP4=`psep $DISK4`
-    
-    PARTBOOT1=${DISK1}${PSEP1}${SUFFBOOT}
-    PARTBOOT2=${DISK2}${PSEP2}${SUFFBOOT}
-    PARTBOOT3=${DISK3}${PSEP3}${SUFFBOOT}
-    PARTBOOT4=${DISK4}${PSEP4}${SUFFBOOT}
-    
-    PARTROOT1=${DISK1}${PSEP1}${SUFFROOT}
-    PARTROOT2=${DISK2}${PSEP2}${SUFFROOT}
-    PARTROOT3=${DISK3}${PSEP3}${SUFFROOT}
-    PARTROOT4=${DISK4}${PSEP4}${SUFFROOT}
-    
-    PARTSWAP1=${DISK1}${PSEP1}${SUFFSWAP}
-    PARTSWAP2=${DISK2}${PSEP2}${SUFFSWAP}
-    PARTSWAP3=${DISK3}${PSEP3}${SUFFSWAP}
-    PARTSWAP4=${DISK4}${PSEP4}${SUFFSWAP}
-
     mdadm --stop --scan
 
     for part in \
@@ -234,6 +237,12 @@ raid10_partitions () {
     sgdisk -n1:0:0 -t1:8300 $DISKBOOT
     sgdisk -n1:0:0 -t1:8300 $DISKROOT
     sgdisk -n1:0:0 -t1:8300 $DISKSWAP
+}
+
+open_raid10_partitions () {
+    mdadm --assemble ${DISKBOOT} $PARTBOOT1 $PARTBOOT2 $PARTBOOT3 $PARTBOOT4
+    mdadm --assemble ${DISKROOT} $PARTROOT1 $PARTROOT2 $PARTROOT3 $PARTROOT4
+    mdadm --assemble ${DISKSWAP} $PARTSWAP1 $PARTSWAP2 $PARTSWAP3 $PARTSWAP4
 }
 
 open_partitions () {
@@ -265,10 +274,6 @@ build_partitions () {
     mkfs.btrfs ${FORCBTRFS} -L root ${ROOTPART}
     mkswap ${SWAPPART}
 
-    if [ "$DISKLAYOUT" != dualboot ] ; then
-        mkdosfs -F 32 -s 1 -n EFI ${PARTUEFI}
-    fi
-    
     mount ${ROOTPART} ${ROOTDIR}
     btrfs subvolume create ${ROOTDIR}/@
     mkdir ${ROOTDIR}/@/home

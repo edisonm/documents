@@ -88,6 +88,7 @@ config_initpacks () {
       ) | debconf-set-selections -v
     apt-get install --yes locales console-setup
     dpkg-reconfigure locales tzdata keyboard-configuration console-setup -f noninteractive
+    apt-get install --yes mdadm
 }
 
 unpack_debian () {
