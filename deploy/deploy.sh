@@ -2,6 +2,8 @@
 
 . `dirname $0`/common.sh
 
+set -x
+
 # 2021-05-03 by Edison Mera
 
 # Script to automate deployment of Debian 11 (bullseye) in several scenarios
@@ -18,16 +20,16 @@
 #   must run in a non-interactive way.
 
 # Machine specific configuration:
-USERNAME=edison
-FULLNAME="Edison Mera"
-DESTNAME=debian
+USERNAME=admin
+FULLNAME="Administrative Account"
+DESTNAME=luna
 # APT Cache Server, leave it empty to disable:
-APTCACHER=10.8.0.1
+# APTCACHER=10.8.0.1
 
 # Specifies if the machine is encrypted:
-# ENCRYPT=yes
+ENCRYPT=yes
 # TANG Server, leave it empty to disable:
-TANGSERV=10.8.0.2
+# TANGSERV=10.8.0.2
 # Use TPM2, if available
 if [ -e /dev/tpm0 ]; then
     WITHTPM2=1
@@ -46,8 +48,8 @@ DEBPACKS="acl binutils build-essential openssh-server"
 # Disk layout:
 # DISKLAYOUT=dualboot
 # DISKLAYOUT=singboot
-# DISKLAYOUT=wipeout
-DISKLAYOUT=raid10
+DISKLAYOUT=wipeout
+# DISKLAYOUT=raid10
 
 ROOTDIR=${ROOTDIR:-/mnt}
 
@@ -89,49 +91,6 @@ make_partitions () {
     sgdisk     -n5:0:$3       -t5:8300 $1
 }
 
-setenv_singboot () {
-    # Unit where you will install Debian
-    # DISK=/dev/mmcblk0
-    # DISK=/dev/nvme0n1
-    DISK=/dev/vda
-    PSEP=`psep ${DISK}`
-    PARTUEFI=${DISK}${PSEP}${SUFFUEFI}
-    PARTBOOT=${DISK}${PSEP}${SUFFBOOT}
-    PARTROOT=${DISK}${PSEP}${SUFFROOT}
-    PARTSWAP=${DISK}${PSEP}${SUFFSWAP}
-}
-
-singboot_partitions () {
-    SUFFUEFI=2
-    SUFFBOOT=3
-    SUFFROOT=4
-    SUFFSWAP=5
-    setenv_singboot
-    make_bootefipar $DISK
-    make_partitions $DISK +26G +4G
-}
-
-wipeout_partitions () {
-    SUFFUEFI=2
-    SUFFBOOT=3
-    SUFFROOT=4
-    SUFFSWAP=5
-    setenv_singboot
-    # First, wipeout the disk:
-    sgdisk -o $DISK
-    make_bootefipar $DISK
-    make_partitions $DISK +26G +4G
-}
-
-dualboot_partitions () {
-    SUFFUEFI=1
-    SUFFBOOT=4
-    SUFFROOT=5
-    SUFFSWAP=6
-    setenv_singboot
-    make_partitions ${DISK} +26G +4G
-}
-
 psep () {
     LASTCHDSK=${1: -1}
     if [ "${LASTCHDSK##[0-9]}" == "" ] ; then
@@ -139,7 +98,40 @@ psep () {
     fi
 }
 
-raid10_partitions () {
+setenv_singdual () {
+    # Unit where you will install Debian
+    # DISK=/dev/mmcblk0
+    # DISK=/dev/nvme0n1
+    # DISK=/dev/vda
+    DISK=/dev/sda
+    PSEP=`psep ${DISK}`
+    PARTUEFI=${DISK}${PSEP}${SUFFUEFI}
+    PARTBOOT=${DISK}${PSEP}${SUFFBOOT}
+    PARTROOT=${DISK}${PSEP}${SUFFROOT}
+    PARTSWAP=${DISK}${PSEP}${SUFFSWAP}
+}
+
+setenv_singboot () {
+    SUFFUEFI=2
+    SUFFBOOT=3
+    SUFFROOT=4
+    SUFFSWAP=5
+    setenv_singdual
+}
+
+setenv_wipeout () {
+    setenv_singboot
+}
+
+setenv_dualboot () {
+    SUFFUEFI=1
+    SUFFBOOT=4
+    SUFFROOT=5
+    SUFFSWAP=6
+    setenv_singdual
+}
+
+setenv_raid10 () {
     DISK1=/dev/sda
     DISK2=/dev/sdb
     DISK3=/dev/sdc
@@ -162,12 +154,42 @@ raid10_partitions () {
 
     # Pick one, later you can sync the other copies
     PARTUEFI=${DISK1}${PSEP}${SUFFUEFI}
+}
+
+setenv_${DISKLAYOUT}
+
+singboot_partitions () {
+    make_bootefipar $DISK
+    make_partitions $DISK +26G +8G
+}
+
+wipeout_partitions () {
+    # First, wipeout the disk:
+    sgdisk -o $DISK
+    make_bootefipar $DISK
+    make_partitions $DISK +26G +8G
+}
+
+dualboot_partitions () {
+    make_partitions ${DISK} +26G +4G
+}
+
+raid10_partitions () {
+
+    mdadm --stop --scan
     
     sgdisk -o $DISK1
     sgdisk -o $DISK2
     sgdisk -o $DISK3
     sgdisk -o $DISK4
+
+    partprobe
     
+    make_bootefipar $DISK1
+    make_bootefipar $DISK2
+    make_bootefipar $DISK3
+    make_bootefipar $DISK4
+
     make_partitions $DISK1 +32G +4G
     make_partitions $DISK2 +32G +4G
     make_partitions $DISK3 +32G +4G
@@ -192,14 +214,36 @@ raid10_partitions () {
     PARTSWAP2=${DISK2}${PSEP2}${SUFFSWAP}
     PARTSWAP3=${DISK3}${PSEP3}${SUFFSWAP}
     PARTSWAP4=${DISK4}${PSEP4}${SUFFSWAP}
-    
-    mdadm --create ${PARTBOOT} --level raid10 --metadata=1.0 --raid-devices 4 $PARTBOOT1 $PARTBOOT2 $PARTBOOT3 $PARTBOOT4
-    mdadm --create ${PARTROOT} --level raid10 --raid-devices 4 $PARTROOT1 $PARTROOT2 $PARTROOT3 $PARTROOT4
-    mdadm --create ${PARTSWAP} --level raid0  --raid-devices 4 $PARTSWAP1 $PARTSWAP2 $PARTSWAP3 $PARTSWAP4
+
+    mdadm --stop --scan
+
+    for part in \
+        $PARTBOOT1 $PARTBOOT2 $PARTBOOT3 $PARTBOOT4 \
+                   $PARTROOT1 $PARTROOT2 $PARTROOT3 $PARTROOT4 \
+                   $PARTSWAP1 $PARTSWAP2 $PARTSWAP3 $PARTSWAP4
+    do
+        mdadm --zero-superblock $part || true
+    done
+
+    partprobe
+
+    mdadm --create ${DISKBOOT} --level raid1 --metadata=1.0 --raid-devices 4 --force $PARTBOOT1 $PARTBOOT2 $PARTBOOT3 $PARTBOOT4
+    mdadm --create ${DISKROOT} --level raid10 --raid-devices 4 --force $PARTROOT1 $PARTROOT2 $PARTROOT3 $PARTROOT4
+    mdadm --create ${DISKSWAP} --level raid0  --raid-devices 4 --force $PARTSWAP1 $PARTSWAP2 $PARTSWAP3 $PARTSWAP4
 
     sgdisk -n1:0:0 -t1:8300 $DISKBOOT
     sgdisk -n1:0:0 -t1:8300 $DISKROOT
     sgdisk -n1:0:0 -t1:8300 $DISKSWAP
+}
+
+open_partitions () {
+    if [ "${ENCRYPT}" == yes ] ; then
+        if [ "$KEY_" == "" ] ; then
+            config_key
+        fi
+        printf "%s" "$KEY_"|cryptsetup luksOpen   --key-file - ${PARTROOT} crypt_root
+        printf "%s" "$KEY_"|cryptsetup luksOpen   --key-file - ${PARTSWAP} crypt_swap
+    fi
 }
 
 build_partitions () {
@@ -208,9 +252,9 @@ build_partitions () {
     if [ "${ENCRYPT}" == yes ] ; then
         printf "%s" "$KEY_"|cryptsetup luksFormat --key-file - ${PARTROOT}
         printf "%s" "$KEY_"|cryptsetup luksFormat --key-file - ${PARTSWAP}
-        printf "%s" "$KEY_"|cryptsetup luksOpen   --key-file - ${PARTROOT} crypt_root
-        printf "%s" "$KEY_"|cryptsetup luksOpen   --key-file - ${PARTSWAP} crypt_swap
     fi
+
+    open_partitions
 
     if [ "$DISKLAYOUT" == wipeout ] || [ "$DISKLAYOUT" == raid10 ] ; then
         FORCEEXT4="-F"
