@@ -180,14 +180,13 @@ setenv_${DISKLAYOUT}
 
 singboot_partitions () {
     make_bootefipar $DISK
-    make_partitions $DISK +26G +8G
+    make_partitions $DISK +26G 0
 }
 
 wipeout_partitions () {
     # First, wipeout the disk:
     sgdisk -o $DISK
-    make_bootefipar $DISK
-    make_partitions $DISK +26G +8G
+    singboot_partitions $DISK
 }
 
 dualboot_partitions () {
@@ -628,16 +627,19 @@ config_encryption () {
 
 inspkg_encryption () {
     if [ "${ENCRYPT}" == yes ] ; then
-        apt-get install --yes cryptsetup
+        ENCPACKS=cryptsetup
         if [ "$TANGSERV" != "" ] || [ "$TPMVERSION" == "2" ] ; then
-            apt-get install --yes clevis
+            ENCPACKS+=" clevis"
             if [ "$TPMVERSION" == "2" ] ; then
-                apt-get install --yes clevis-tpm2
+                ENCPACKS+=" clevis-tpm2"
             fi
         fi
-        if [ "$TMPVERSION" == "1" ] ; then
-            apt-get install --yes tpm-tools
+        if [ "$TPMVERSION" == "1" ] ; then
+            ENCPACKS+=" tpm-tools"
         fi
+        apt-get install --yes ${ENCPACKS}
+        /usr/sbin/tcsd
+        /usr/sbin/tpm_takeownership -y -z
     fi
 }
 
@@ -680,22 +682,6 @@ wipeout () {
     unbind_dirs
     unmount_partitions
 }
-
-# vmdesktop () {
-    
-# }
-
-# vmserver () {
-# }
-
-# vmtiny () {
-# }
-
-# phdesktop () {
-# }
-
-# phserver () {
-# }
 
 if [ $# = 0 ] ; then
     wipeout
