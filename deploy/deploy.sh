@@ -30,12 +30,9 @@ APTCACHER=10.8.0.1
 ENCRYPT=yes
 # TANG Server, leave it empty to disable:
 # TANGSERV=10.8.0.2
-# Use TPM2, if available
-if [ -e /dev/tpm0 ] && [ "`cat /sys/class/tpm/tpm0/tpm_version_major`" == "2" ] ; then
-    WITHTPM2=1
-else
-    WITHTPM2=0
-fi
+# Use TPM, if available.  Leave empty for no tpm
+TPMVERSION=`cat /sys/class/tpm/tpm0/tpm_version_major`
+
 # Extra packages you want to install, leave empty for a small footprint
 DEBPACKS="acl binutils build-essential openssh-server"
 # DEBPACKS+=" emacs firefox-esr"
@@ -405,6 +402,39 @@ EOF
     chmod a+x /etc/initramfs-tools/hooks/clevis_tang
 }
 
+config_tpm_tools () {
+    cat <<'EOF' > /etc/initramfs-tools/hooks/tpm_tools
+#!/bin/sh
+
+PREREQ=""
+prereqs() {
+    echo "$PREREQ"
+}
+case "$1" in
+    prereqs)
+	prereqs
+	exit 0
+	;;
+esac
+
+. /usr/share/initramfs-tools/hook-functions
+# Begin real processing below this line
+
+copy_exec /usr/bin/tpm_sealdata
+copy_exec /usr/bin/tpm_unsealdata
+copy_exec /usr/lib/x86_64-linux-gnu/libtpm_unseal.so.1
+copy_exec /usr/lib/x86_64-linux-gnu/libcrypto.so.1.1
+
+# for file in `ls /usr/bin/tpm2_*` ; do
+#     copy_exec $file
+# done
+
+/usr/bin/tpm_sealdata -i /crypto_keyfile.bin -o ${DESTDIR}/autounlock.key -z
+
+EOF
+    chmod a+x /etc/initramfs-tools/hooks/tpm_tools
+}
+
 config_clevis_tpm2 () {
     cat <<'EOF' > /etc/initramfs-tools/hooks/clevis_tpm2
 #!/bin/sh
@@ -507,6 +537,24 @@ EOF
     chmod a+x /lib/cryptsetup/scripts/decrypt_clevis
 }
 
+config_decrypt_tpm () {
+    cat <<'EOF' | sed -e s:'<KEYSTORE>':"$KEYSTORE":g \
+                      -e s:'<HOSTNAME>':"$DESTNAME":g \
+                      > /lib/cryptsetup/scripts/decrypt_tpm
+#!/bin/sh
+
+ASKPASS_='/lib/cryptsetup/askpass'
+PROMPT_="${CRYPTTAB_NAME}'s password: "
+
+if /usr/bin/tpm_unsealdata -i $1 -z ; then
+    exit 0
+fi
+
+$ASKPASS_ "$PROMPT_"
+EOF
+    chmod a+x /lib/cryptsetup/scripts/decrypt_tpm
+}
+
 config_clevis_network () {
     cat <<'EOF' > /etc/initramfs-tools/scripts/local-top/network
 #!/bin/sh
@@ -540,7 +588,7 @@ config_noresume () {
 
 config_crypttab () {
     if [ "${ENCRYPT}" == yes ] ; then
-        if [ "$TANGSERV" != "" ] || [ "$WITHTPM2" == "1" ] ; then
+        if [ "$TANGSERV" != "" ] || [ "$TPMVERSION" == "2" ] ; then
             UNLOCKFILE="/autounlock.key"
             UNLOCKOPTS=",keyscript=decrypt_clevis"
         else
@@ -558,17 +606,21 @@ config_crypttab () {
 
 config_encryption () {
     if [ "${ENCRYPT}" == yes ] ; then
-        if [ "$TANGSERV" != "" ] || [ "$WITHTPM2" == "1" ] ; then
+        if [ "$TANGSERV" != "" ] || [ "$TPMVERSION" == "2" ] ; then
             config_decrypt_clevis
             config_clevis
             if [ "$TANGSERV" != "" ] ; then
                 config_clevis_network
                 config_clevis_tang
             fi
-            if [ "$WITHTPM2" == "1" ] ; then
+            if [ "$TPMVERSION" == "2" ] ; then
                 config_clevis_tpm2
                 config_tpm_tis
             fi
+        fi
+        if [ "$TPMVERSION" == "1" ] ; then
+            config_decrypt_tpm
+            config_tpm_tools
         fi
         config_noresume
     fi
@@ -577,11 +629,14 @@ config_encryption () {
 inspkg_encryption () {
     if [ "${ENCRYPT}" == yes ] ; then
         apt-get install --yes cryptsetup
-        if [ "$TANGSERV" != "" ] || [ "$WITHTPM2" == "1" ] ; then
+        if [ "$TANGSERV" != "" ] || [ "$TPMVERSION" == "2" ] ; then
             apt-get install --yes clevis
-            if [ "$WITHTPM2" == "1" ] ; then
+            if [ "$TPMVERSION" == "2" ] ; then
                 apt-get install --yes clevis-tpm2
             fi
+        fi
+        if [ "$TMPVERSION" == "1" ] ; then
+            apt-get install --yes tpm-tools
         fi
     fi
 }
