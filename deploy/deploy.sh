@@ -424,9 +424,36 @@ copy_exec /usr/bin/tpm_unsealdata
 copy_exec /usr/lib/x86_64-linux-gnu/libtpm_unseal.so.1
 copy_exec /usr/lib/x86_64-linux-gnu/libcrypto.so.1.1
 
-# for file in `ls /usr/bin/tpm2_*` ; do
-#     copy_exec $file
-# done
+# copy the daemon + config in the initrd 
+copy_exec /usr/sbin/tcsd /sbin 
+copy_exec /etc/tcsd.conf /etc 
+ 
+# copy the necessary libraries 
+cp -fpL /lib/x86_64-linux-gnu/libns* ${DESTDIR}/lib/x86_64-linux-gnu/ 
+ 
+# copy the tpm configuration 
+mkdir -p "$DESTDIR/var/lib/tpm" 
+cp /var/lib/tpm/* "$DESTDIR/var/lib/tpm/" 
+ 
+#copy the files to read the NVRAM and to read the secret  
+# copy_exec /usr/sbin/tpm_nvread /sbin/
+# copy_exec /usr/sbin/tpm_nvinfo /sbin/
+# copy_exec /sbin/getsecret.sh /sbin
+
+cp /usr/sbin/tpm_* ${DESTDIR}/sbin
+
+#create etc/passwd
+groupid=`id -G tss`
+userid=`id -u tss`
+echo "root:x:0:0:root:/root:/bin/sh" >  ${DESTDIR}/etc/passwd
+echo "tss:x:$userid:$groupid::/var/lib/tpm:/bin/false" >> ${DESTDIR}/etc/passwd
+
+#create etc/hosts
+echo "127.0.0.1 localhost\n::1     localhost ip6-localhost ip6-loopback\nff02::1 ip6-allnodes\nff02::2 ip6-allrouters\n" > ${DESTDIR}/etc/hosts
+
+#create etc/group
+echo "root:x:0:" > ${DESTDIR}/etc/group
+echo "tss:x:$groupid:" >>  ${DESTDIR}/etc/group
 
 /usr/bin/tpm_sealdata -i /crypto_keyfile.bin -o ${DESTDIR}/autounlock.key -z
 
@@ -537,13 +564,13 @@ EOF
 }
 
 config_decrypt_tpm () {
-    cat <<'EOF' | sed -e s:'<KEYSTORE>':"$KEYSTORE":g \
-                      -e s:'<HOSTNAME>':"$DESTNAME":g \
-                      > /lib/cryptsetup/scripts/decrypt_tpm
+    cat <<'EOF' > /lib/cryptsetup/scripts/decrypt_tpm
 #!/bin/sh
 
 ASKPASS_='/lib/cryptsetup/askpass'
 PROMPT_="${CRYPTTAB_NAME}'s password: "
+
+/usr/sbin/tcsd && sleep 1
 
 if /usr/bin/tpm_unsealdata -i $1 -z ; then
     exit 0
@@ -554,7 +581,7 @@ EOF
     chmod a+x /lib/cryptsetup/scripts/decrypt_tpm
 }
 
-config_clevis_network () {
+config_network () {
     cat <<'EOF' > /etc/initramfs-tools/scripts/local-top/network
 #!/bin/sh
 
@@ -609,7 +636,7 @@ config_encryption () {
             config_decrypt_clevis
             config_clevis
             if [ "$TANGSERV" != "" ] ; then
-                config_clevis_network
+                config_network
                 config_clevis_tang
             fi
             if [ "$TPMVERSION" == "2" ] ; then
@@ -618,6 +645,7 @@ config_encryption () {
             fi
         fi
         if [ "$TPMVERSION" == "1" ] ; then
+	    config_network
             config_decrypt_tpm
             config_tpm_tools
         fi
@@ -638,7 +666,7 @@ inspkg_encryption () {
             ENCPACKS+=" tpm-tools"
         fi
         apt-get install --yes ${ENCPACKS}
-        /usr/sbin/tcsd
+        /usr/sbin/tcsd && sleep 1
         /usr/sbin/tpm_takeownership -y -z
     fi
 }
@@ -661,6 +689,11 @@ config_chroot () {
     cp deploy.sh common.sh ${ROOTDIR}/tmp/
     EFI_=$(efibootmgr -q && echo 1 || echo 0)
     chroot ${ROOTDIR} /tmp/deploy.sh $*
+}
+
+show_settings () {
+    echo TPMVERSION=$TPMVERSION
+    echo ENCRYPT=$ENCRYPT
 }
 
 wipeout () {
