@@ -36,7 +36,7 @@ pxeserver () {
     config_vmlinuz
     
     if [ "${FIRST}" == 1 ] ; then
-        config_key
+        set_key
         mount_partitions
         unpack_debian
         bind_dirs

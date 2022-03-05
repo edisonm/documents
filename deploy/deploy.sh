@@ -22,16 +22,17 @@
 # Machine specific configuration:
 USERNAME=admin
 FULLNAME="Administrative Account"
-DESTNAME=luna
+DESTNAME=debian4
 # APT Cache Server, leave it empty to disable:
-APTCACHER=10.8.0.1
+# APTCACHER=10.8.0.1
 
 # Specifies if the machine is encrypted:
 ENCRYPT=yes
 # TANG Server, leave it empty to disable:
 # TANGSERV=10.8.0.2
 # Use TPM, if available.  Leave empty for no tpm
-TPMVERSION=`cat /sys/class/tpm/tpm0/tpm_version_major`
+TPMVERFILE=/sys/class/tpm/tpm0/tpm_version_major
+TPMVERSION=`if [ -f ${TPMVERFILE} ] ; then cat ${TPMVERFILE} ; fi`
 
 # Extra packages you want to install, leave empty for a small footprint
 DEBPACKS="acl binutils build-essential openssh-server"
@@ -43,10 +44,19 @@ DEBPACKS="acl binutils build-essential openssh-server"
 # DEBPACKS+="acpid alsa-utils anacron fcitx libreoffice"
 
 # Disk layout:
+
+# Start at 3, similar to singboot without redefined bios and uefi partitons
 # DISKLAYOUT=dualboot
-# DISKLAYOUT=singboot
+
+# Start at 4
+# DISKLAYOUT=dualboot4
+
+DISKLAYOUT=singboot
 # DISKLAYOUT=wipeout
-DISKLAYOUT=raid10
+# DISKLAYOUT=raid10
+
+# Enable if you are attempting to continue an incomplete installation
+# RESUMING=yes
 
 ROOTDIR=${ROOTDIR:-/mnt}
 
@@ -62,32 +72,72 @@ else
 fi
 
 warn_confirm () {
-    YES_="$($ASKPASS_ "WARNING: This script will destroy all data on your computer, are you sure? (Type uppercase yes):")"
+    if [ "${RESUMING}" == "yes" ] ; then
+        MESSAGE="This will attempt to resume a previous installation"
+    else
+        MESSAGE="This will destroy all data on your computer"
+    fi
+    YES_="$($ASKPASS_ "WARNING: ${MESSAGE}, are you sure? (Type uppercase yes):")"
 
     if [ "$YES_" != "YES" ]; then
-        echo "Deployment cancelled"
+        echo "Operation cancelled by the user"
         exit 1
     fi
 }
 
+skip_if_resuming () {
+    if [ "${RESUMING}" != "yes" ] ; then
+        $*
+    fi
+}
+
+exec_once () {
+    mkdir -p /var/lib/deploy
+    if [ ! -f /var/lib/deploy/$1 ] ; then
+        $*
+        touch /var/lib/deploy/$1
+    fi
+}
+
+exec_if_resuming () {
+    if [ "${RESUMING}" == "yes" ] ; then
+        $*
+    fi
+}
+
+if_else_resuming () {
+    if [ "${RESUMING}" == "yes" ] ; then
+        $1
+    else
+        $2
+    fi
+}
+
 make_bootefipar () {
+    skip_if_resuming do_make_bootefipar $*
+}
+
+do_make_bootefipar () {
     # Partition your disk(s). This scheme works for both BIOS and UEFI, so that
     # we can switch without resizing partitions (which is a headache):
     # BIOS booting:
-    sgdisk -a1 -n1:24K:+1000K -t1:EF02 $1
+    sgdisk -a1 -n${SUFFBIOS}:24K:+1000K -t${SUFFBIOS}:EF02 $1
     # UEFI booting:
-    sgdisk     -n2:1M:+512M   -t2:EF00 $1
-
+    sgdisk     -n${SUFFUEFI}:1M:+512M   -t${SUFFUEFI}:EF00 $1
     mkdosfs -F 32 -s 1 -n EFI ${1}`psep ${1}`${SUFFUEFI}
 }
 
 make_partitions () {
+    skip_if_resuming do_make_partitions $*
+}
+
+do_make_partitions () {
     # Boot patition:
-    sgdisk     -n3:0:+2G      -t3:8300 $1
+    sgdisk     -n${SUFFBOOT}:0:+2G -t${SUFFBOOT}:8300 $1
     # Root partition:
-    sgdisk     -n4:0:$2       -t4:8300 $1
+    sgdisk     -n${SUFFROOT}:0:$2  -t${SUFFROOT}:8300 $1
     # SWAP partition:
-    sgdisk     -n5:0:$3       -t5:8300 $1
+    sgdisk     -n${SUFFSWAP}:0:$3  -t${SUFFSWAP}:8300 $1
 }
 
 psep () {
@@ -103,6 +153,7 @@ setenv_singdual () {
     # DISK=/dev/nvme0n1
     # DISK=/dev/vda
     DISK=/dev/sda
+    # DISK=/dev/sdb
     PSEP=`psep ${DISK}`
     PARTUEFI=${DISK}${PSEP}${SUFFUEFI}
     PARTBOOT=${DISK}${PSEP}${SUFFBOOT}
@@ -111,6 +162,7 @@ setenv_singdual () {
 }
 
 setenv_singboot () {
+    SUFFBIOS=1
     SUFFUEFI=2
     SUFFBOOT=3
     SUFFROOT=4
@@ -127,6 +179,14 @@ setenv_dualboot () {
     SUFFBOOT=4
     SUFFROOT=5
     SUFFSWAP=6
+    setenv_singdual
+}
+
+setenv_dualboot4 () {
+    SUFFUEFI=1
+    SUFFBOOT=3
+    SUFFROOT=4
+    SUFFSWAP=5
     setenv_singdual
 }
 
@@ -180,42 +240,56 @@ setenv_${DISKLAYOUT}
 
 singboot_partitions () {
     make_bootefipar $DISK
-    make_partitions $DISK +26G 0
+    make_partitions $DISK +32G +4G
 }
 
 wipeout_partitions () {
     # First, wipeout the disk:
-    sgdisk -o $DISK
+    skip_if_resuming sgdisk -o $DISK
     singboot_partitions $DISK
 }
 
 dualboot_partitions () {
-    make_partitions ${DISK} +26G +4G
+    make_partitions ${DISK} +32G +4G
+}
+
+dualboot4_partitions () {
+    make_partitions ${DISK} +32G +4G
+}
+
+reopen_raid10_partitions () {
+    mdadm --stop --scan
+    mdadm --assemble ${DISKBOOT} $PARTBOOT1 $PARTBOOT2 $PARTBOOT3 $PARTBOOT4
+    mdadm --assemble ${DISKROOT} $PARTROOT1 $PARTROOT2 $PARTROOT3 $PARTROOT4
+    mdadm --assemble ${DISKSWAP} $PARTSWAP1 $PARTSWAP2 $PARTSWAP3 $PARTSWAP4
 }
 
 raid10_partitions () {
+    if_else_resuming \
+        reopen_raid10_partitions \
+        create_raid10_partitions
+}
 
+create_raid10_partitions () {
     mdadm --stop --scan
-    
     sgdisk -o $DISK1
     sgdisk -o $DISK2
     sgdisk -o $DISK3
     sgdisk -o $DISK4
 
     partprobe
-    
-    make_bootefipar $DISK1
-    make_bootefipar $DISK2
-    make_bootefipar $DISK3
-    make_bootefipar $DISK4
 
-    make_partitions $DISK1 +32G +4G
-    make_partitions $DISK2 +32G +4G
-    make_partitions $DISK3 +32G +4G
-    make_partitions $DISK4 +32G +4G
-    
+    do_make_bootefipar $DISK1
+    do_make_bootefipar $DISK2
+    do_make_bootefipar $DISK3
+    do_make_bootefipar $DISK4
+
+    do_make_partitions $DISK1 +32G +4G
+    do_make_partitions $DISK2 +32G +4G
+    do_make_partitions $DISK3 +32G +4G
+    do_make_partitions $DISK4 +32G +4G
+
     mdadm --stop --scan
-
     for part in \
         $PARTBOOT1 $PARTBOOT2 $PARTBOOT3 $PARTBOOT4 \
                    $PARTROOT1 $PARTROOT2 $PARTROOT3 $PARTROOT4 \
@@ -223,49 +297,49 @@ raid10_partitions () {
     do
         mdadm --zero-superblock $part || true
     done
-
+    
     partprobe
-
+    
     mdadm --create ${DISKBOOT} --level raid1 --metadata=1.0 --raid-devices 4 --force $PARTBOOT1 $PARTBOOT2 $PARTBOOT3 $PARTBOOT4
     mdadm --create ${DISKROOT} --level raid10 --raid-devices 4 --force $PARTROOT1 $PARTROOT2 $PARTROOT3 $PARTROOT4
     mdadm --create ${DISKSWAP} --level raid0  --raid-devices 4 --force $PARTSWAP1 $PARTSWAP2 $PARTSWAP3 $PARTSWAP4
-
+    
     sgdisk -n1:0:0 -t1:8300 $DISKBOOT
     sgdisk -n1:0:0 -t1:8300 $DISKROOT
     sgdisk -n1:0:0 -t1:8300 $DISKSWAP
 }
 
-open_raid10_partitions () {
-    mdadm --assemble ${DISKBOOT} $PARTBOOT1 $PARTBOOT2 $PARTBOOT3 $PARTBOOT4
-    mdadm --assemble ${DISKROOT} $PARTROOT1 $PARTROOT2 $PARTROOT3 $PARTROOT4
-    mdadm --assemble ${DISKSWAP} $PARTSWAP1 $PARTSWAP2 $PARTSWAP3 $PARTSWAP4
-}
-
 open_partitions () {
     if [ "${ENCRYPT}" == yes ] ; then
         if [ "$KEY_" == "" ] ; then
-            config_key
+            ask_key
         fi
-        printf "%s" "$KEY_"|cryptsetup luksOpen   --key-file - ${PARTROOT} crypt_root
-        printf "%s" "$KEY_"|cryptsetup luksOpen   --key-file - ${PARTSWAP} crypt_swap
+        printf "%s" "$KEY_"|cryptsetup luksOpen --key-file - ${PARTROOT} crypt_root
+        printf "%s" "$KEY_"|cryptsetup luksOpen --key-file - ${PARTSWAP} crypt_swap
     fi
 }
 
-build_partitions () {
-    ${DISKLAYOUT}_partitions
+close_partitions () {
+    if [ "${ENCRYPT}" == yes ] ; then
+        cryptsetup luksClose crypt_root
+        cryptsetup luksClose crypt_swap
+    fi
+}
 
+crypt_partitions () {
     if [ "${ENCRYPT}" == yes ] ; then
         printf "%s" "$KEY_"|cryptsetup luksFormat --key-file - ${PARTROOT}
         printf "%s" "$KEY_"|cryptsetup luksFormat --key-file - ${PARTSWAP}
     fi
+}
 
-    open_partitions
+build_partitions () {
 
     if [ "$DISKLAYOUT" == wipeout ] || [ "$DISKLAYOUT" == raid10 ] ; then
         FORCEEXT4="-F"
         FORCBTRFS="-f"
     fi
-    
+
     mkfs.ext4  ${FORCEEXT4} -L boot ${PARTBOOT}
     mkfs.btrfs ${FORCBTRFS} -L root ${ROOTPART}
     mkswap ${SWAPPART}
@@ -277,7 +351,7 @@ build_partitions () {
     btrfs subvolume create ${ROOTDIR}/@home
 
     if [ "${ENCRYPT}" == yes ] ; then
-        dd if=/dev/urandom bs=2048 count=1 of=${ROOTDIR}/@/crypto_keyfile.bin
+        dd if=/dev/urandom bs=512 count=1 of=${ROOTDIR}/@/crypto_keyfile.bin
         chmod go-rw ${ROOTDIR}/@/crypto_keyfile.bin
         printf "%s" "$KEY_"|cryptsetup luksAddKey ${PARTROOT} ${ROOTDIR}/@/crypto_keyfile.bin --key-file -
         printf "%s" "$KEY_"|cryptsetup luksAddKey ${PARTSWAP} ${ROOTDIR}/@/crypto_keyfile.bin --key-file -
@@ -333,14 +407,21 @@ unmount_partitions () {
 }
 
 config_grubip () {
-    if [ "${ENCRYPT}" == yes ] && [ "$TANGSERV" != "" ] ; then
-        IP=$(hostname -I|awk '{print $1}')
-        GW=$(ip route|awk '/default/{print $3}')
-        cp ${ROOTDIR}/etc/default/grub /tmp/
-        # in some systems, in /etc/default/grub, a line like this could be required:
-        sed -e 's/GRUB_CMDLINE_LINUX=""/GRUB_CMDLINE_LINUX="'"ip=$IP::$GW:$MK"'"/g' /tmp/grub \
-            > ${ROOTDIR}/etc/default/grub
-    fi
+    IP=$(hostname -I|awk '{print $1}')
+    GW=$(ip route|awk '/default/{print $3}')
+    cp /etc/default/grub /tmp/
+    # in some systems, in /etc/default/grub, a line like this could be required:
+    sed -e 's/GRUB_CMDLINE_LINUX=""/GRUB_CMDLINE_LINUX="'"ip=$IP::$GW:$MK"'"/g' /tmp/grub \
+        > /etc/default/grub
+}
+
+remove_grubip () {
+    IP=$(hostname -I|awk '{print $1}')
+    GW=$(ip route|awk '/default/{print $3}')
+    cp /etc/default/grub /tmp/
+    # in some systems, in /etc/default/grub, a line like this could be required:
+    sed -e 's/GRUB_CMDLINE_LINUX="'"ip=$IP::$GW:$MK"'"/GRUB_CMDLINE_LINUX=""/g' /tmp/grub \
+        > /etc/default/grub
 }
 
 config_grub () {
@@ -401,6 +482,10 @@ EOF
     chmod a+x /etc/initramfs-tools/hooks/clevis_tang
 }
 
+remove_clevis_tang () {
+    rm -f /etc/initramfs-tools/hooks/clevis_tang
+}
+
 config_tpm_tools () {
     cat <<'EOF' > /etc/initramfs-tools/hooks/tpm_tools
 #!/bin/sh
@@ -419,6 +504,7 @@ esac
 . /usr/share/initramfs-tools/hook-functions
 # Begin real processing below this line
 
+copy_file script /lib/cryptsetup/scripts/decrypt_tpm
 copy_exec /usr/bin/tpm_sealdata
 copy_exec /usr/bin/tpm_unsealdata
 copy_exec /usr/lib/x86_64-linux-gnu/libtpm_unseal.so.1
@@ -429,12 +515,12 @@ copy_exec /usr/sbin/tcsd /sbin
 copy_exec /etc/tcsd.conf /etc 
  
 # copy the necessary libraries 
-cp -fpL /lib/x86_64-linux-gnu/libns* ${DESTDIR}/lib/x86_64-linux-gnu/ 
+cp -fP /lib/x86_64-linux-gnu/libns* ${DESTDIR}/lib/x86_64-linux-gnu/ 
  
 # copy the tpm configuration 
 mkdir -p "$DESTDIR/var/lib/tpm" 
 cp /var/lib/tpm/* "$DESTDIR/var/lib/tpm/" 
- 
+
 #copy the files to read the NVRAM and to read the secret  
 # copy_exec /usr/sbin/tpm_nvread /sbin/
 # copy_exec /usr/sbin/tpm_nvinfo /sbin/
@@ -459,6 +545,10 @@ echo "tss:x:$groupid:" >>  ${DESTDIR}/etc/group
 
 EOF
     chmod a+x /etc/initramfs-tools/hooks/tpm_tools
+}
+
+remove_tpm_tools () {
+    rm -f /etc/initramfs-tools/hooks/tpm_tools
 }
 
 config_clevis_tpm2 () {
@@ -501,18 +591,28 @@ EOF
     chmod a+x /etc/initramfs-tools/hooks/clevis_tpm2
 }
 
+remove_clevis_tpm2 () {
+    rm -f /etc/initramfs-tools/hooks/clevis_tpm2
+}
+
 config_tpm_tis () {
     # Determine wether the module tpm_tis needs to be added to initramfs-tools modules
     if [ "`lsmod|grep tpm`" != "" ] ; then
-        if [ "`cat /etc/initramfs-tools/modules|grep tpm_tis`" == "" ] ; then
-            echo "tpm_tis" >> /etc/initramfs-tools/modules
+        sed -e s:"# tpm_tis":"tpm_tis":g < /etc/initramfs-tools/modules > /tmp/modules
+        if [ "`cat /tmp/modules|grep tpm_tis`" == "" ] ; then
+            echo "tpm_tis" > /tmp/modules
         fi
+        mv /tmp/modules /etc/initramfs-tools/modules
     fi
 }
 
+remove_tpm_tis () {
+    sed -e s:"# tpm_tis":"tpm_tis":g < /etc/initramfs-tools/modules > /tmp/modules
+    sed -e s:"tpm_tis":"# tpm_tis":g < /tmp/modules > /etc/initramfs-tools/modules
+}
+
 config_clevis () {
-    cat <<'EOF' | sed -e s:'<TANGSERV>':"$TANGSERV":g \
-                      > /etc/initramfs-tools/hooks/clevis
+    cat <<'EOF' > /etc/initramfs-tools/hooks/clevis
 #!/bin/sh
 
 PREREQ=""
@@ -541,14 +641,16 @@ EOF
     chmod a+x /etc/initramfs-tools/hooks/clevis
 }
 
+remove_clevis () {
+    rm -f /etc/initramfs-tools/hooks/clevis
+}
+
 config_decrypt_clevis () {
     # Note: since I didn't manage to encrypt a luks drive via clevis, my next
     # approach is to encrypt the decryption key in the initramfs via clevis, so
     # that it will be safe to keep it in the initrd file.
 
-    cat <<'EOF' | sed -e s:'<KEYSTORE>':"$KEYSTORE":g \
-                      -e s:'<HOSTNAME>':"$DESTNAME":g \
-                      > /lib/cryptsetup/scripts/decrypt_clevis
+    cat <<'EOF' > /lib/cryptsetup/scripts/decrypt_clevis
 #!/bin/sh
 
 ASKPASS_='/lib/cryptsetup/askpass'
@@ -563,6 +665,12 @@ EOF
     chmod a+x /lib/cryptsetup/scripts/decrypt_clevis
 }
 
+remove_decrypt_clevis () {
+    rm -f /lib/cryptsetup/scripts/decrypt_clevis
+}
+
+# $ASKPASS_ "raising lo" > /dev/null
+
 config_decrypt_tpm () {
     cat <<'EOF' > /lib/cryptsetup/scripts/decrypt_tpm
 #!/bin/sh
@@ -570,7 +678,15 @@ config_decrypt_tpm () {
 ASKPASS_='/lib/cryptsetup/askpass'
 PROMPT_="${CRYPTTAB_NAME}'s password: "
 
-/usr/sbin/tcsd && sleep 1
+chown tss:tss /dev/tpm0
+chmod 660 /dev/tpm0
+
+ip address add 127.0.0.1/8 dev lo
+ip link set lo up
+
+if [ -f /usr/sbin/tcsd ] ; then
+    /usr/sbin/tcsd
+fi
 
 if /usr/bin/tpm_unsealdata -i $1 -z ; then
     exit 0
@@ -579,6 +695,10 @@ fi
 $ASKPASS_ "$PROMPT_"
 EOF
     chmod a+x /lib/cryptsetup/scripts/decrypt_tpm
+}
+
+remove_decrypt_tpm () {
+    rm -f /lib/cryptsetup/scripts/decrypt_tpm
 }
 
 config_network () {
@@ -608,6 +728,10 @@ EOF
     chmod a+x /etc/initramfs-tools/scripts/local-top/network
 }
 
+remove_network () {
+    rm -f /etc/initramfs-tools/scripts/local-top/network
+}
+
 config_noresume () {
     echo "RESUME=none" > /etc/initramfs-tools/conf.d/noresume.conf
 }
@@ -617,6 +741,9 @@ config_crypttab () {
         if [ "$TANGSERV" != "" ] || [ "$TPMVERSION" == "2" ] ; then
             UNLOCKFILE="/autounlock.key"
             UNLOCKOPTS=",keyscript=decrypt_clevis"
+        elif [ "$TPMVERSION" == "1" ] ; then
+            UNLOCKFILE="/autounlock.key"
+            UNLOCKOPTS=",keyscript=decrypt_tpm"
         else
             UNLOCKFILE="none               "
             UNLOCKOPTS=""
@@ -632,24 +759,43 @@ config_crypttab () {
 
 config_encryption () {
     if [ "${ENCRYPT}" == yes ] ; then
+        if [ "$TANGSERV" != "" ] # || [ "$TPMVERSION" == "1" ]
+        then
+            config_grubip
+            config_network
+        else
+            remove_grubip
+            remove_network
+        fi
         if [ "$TANGSERV" != "" ] || [ "$TPMVERSION" == "2" ] ; then
             config_decrypt_clevis
             config_clevis
-            if [ "$TANGSERV" != "" ] ; then
-                config_network
-                config_clevis_tang
-            fi
-            if [ "$TPMVERSION" == "2" ] ; then
-                config_clevis_tpm2
-                config_tpm_tis
-            fi
+        else
+            remove_decrypt_clevis
+            remove_clevis
+        fi
+        if [ "$TANGSERV" != "" ] ; then
+            config_clevis_tang
+        else
+            remove_clevis_tang
+        fi
+        if [ "$TPMVERSION" == "1" ] || [ "$TPMVERSION" == "2" ] ; then
+            config_tpm_tis
+        else
+            remove_tpm_tis
         fi
         if [ "$TPMVERSION" == "1" ] ; then
-	    config_network
             config_decrypt_tpm
             config_tpm_tools
+        else
+            remove_decrypt_tpm
+            remove_tpm_tools
         fi
-        config_noresume
+        if [ "$TPMVERSION" == "2" ] ; then
+            config_clevis_tpm2
+        else
+            remove_clevis_tpm2
+        fi
     fi
 }
 
@@ -666,8 +812,10 @@ inspkg_encryption () {
             ENCPACKS+=" tpm-tools"
         fi
         apt-get install --yes ${ENCPACKS}
-        /usr/sbin/tcsd && sleep 1
-        /usr/sbin/tpm_takeownership -y -z
+        if [ "$TPMVERSION" == "1" ] ; then
+            /usr/sbin/tcsd
+            /usr/sbin/tpm_takeownership -y -z || true
+        fi
     fi
 }
 
@@ -678,6 +826,7 @@ do_chroot () {
     config_grub
     inspkg_encryption
     config_encryption
+    config_noresume
     config_crypttab
     config_suspend
     update-grub
@@ -686,34 +835,57 @@ do_chroot () {
 }
 
 config_chroot () {
+    export EFI_=$(efibootmgr -q > /dev/null 2>&1 && echo 1 || echo 0)
     cp deploy.sh common.sh ${ROOTDIR}/tmp/
-    EFI_=$(efibootmgr -q && echo 1 || echo 0)
-    chroot ${ROOTDIR} /tmp/deploy.sh $*
+    chroot ${ROOTDIR} $*
 }
 
 show_settings () {
-    echo TPMVERSION=$TPMVERSION
-    echo ENCRYPT=$ENCRYPT
+    echo TPMVERSION=${TPMVERSION}
+    echo ENCRYPT=${ENCRYPT}
+    echo DISK=${DISK}
 }
 
 wipeout () {
     ROOTDIR=/mnt
+    show_settings
     warn_confirm
-    config_key
+    if_else_resuming \
+        ask_key \
+        set_key
     config_aptcacher
     setup_aptinstall
-    build_partitions
+    ${DISKLAYOUT}_partitions
+    skip_if_resuming \
+        crypt_partitions
+    open_partitions
+    skip_if_resuming \
+        build_partitions
     mount_partitions
-    unpack_debian
+    exec_once unpack_debian
     setup_apt
-    config_aptcacher ${ROOTDIR}
     setup_hostname
     setup_nic
     bind_dirs
-    config_grubip
-    config_chroot do_chroot
+    config_chroot /tmp/deploy.sh do_chroot
     unbind_dirs
     unmount_partitions
+    close_partitions
+}
+
+rescue () {
+    RESUMING=yes
+    ask_key
+    config_aptcacher
+    setup_aptinstall
+    ${DISKLAYOUT}_partitions
+    open_partitions
+    mount_partitions
+    bind_dirs
+    config_chroot
+    unbind_dirs
+    unmount_partitions
+    close_partitions
 }
 
 if [ $# = 0 ] ; then

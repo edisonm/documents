@@ -2,7 +2,7 @@
 
 set -e
 
-config_key () {
+set_key () {
     echo "The master passphrase is used as failover decryption method and admin user password"
     export KEY_="$($ASKPASS_ "New password:")"
     CONFIRM_="$($ASKPASS_ "Retype new password:")"
@@ -12,12 +12,17 @@ config_key () {
     fi
 }
 
+ask_key () {
+    echo "Input the master passphrase you used before"
+    export KEY_="$($ASKPASS_ "Password:")"
+}
+
 bind_dirs () {
-    mount --bind /dev  ${ROOTDIR}/dev
-    mount --bind /proc ${ROOTDIR}/proc
-    mount --bind /sys  ${ROOTDIR}/sys
-    mount --bind /run  ${ROOTDIR}/run
-    mount --bind /tmp  ${ROOTDIR}/tmp
+    mount --rbind /dev  ${ROOTDIR}/dev
+    mount --rbind /proc ${ROOTDIR}/proc
+    mount --rbind /sys  ${ROOTDIR}/sys
+    mount --rbind /run  ${ROOTDIR}/run
+    mount --rbind /tmp  ${ROOTDIR}/tmp
 }
 
 unbind_dirs () {
