@@ -240,7 +240,7 @@ setenv_${DISKLAYOUT}
 
 singboot_partitions () {
     make_bootefipar $DISK
-    make_partitions $DISK +32G +4G
+    make_partitions $DISK +32G +8G
 }
 
 wipeout_partitions () {
@@ -408,7 +408,7 @@ unmount_partitions () {
 
 config_grubip () {
     IP=$(hostname -I|awk '{print $1}')
-    GW=$(ip route|awk '/default/{print $3}')
+    GW=$(ip route|awk '/default/{print $3}'|head -n1)
     cp /etc/default/grub /tmp/
     # in some systems, in /etc/default/grub, a line like this could be required:
     sed -e 's/GRUB_CMDLINE_LINUX=""/GRUB_CMDLINE_LINUX="'"ip=$IP::$GW:$MK"'"/g' /tmp/grub \
@@ -417,7 +417,7 @@ config_grubip () {
 
 remove_grubip () {
     IP=$(hostname -I|awk '{print $1}')
-    GW=$(ip route|awk '/default/{print $3}')
+    GW=$(ip route|awk '/default/{print $3}'|head -n1)
     cp /etc/default/grub /tmp/
     # in some systems, in /etc/default/grub, a line like this could be required:
     sed -e 's/GRUB_CMDLINE_LINUX="'"ip=$IP::$GW:$MK"'"/GRUB_CMDLINE_LINUX=""/g' /tmp/grub \

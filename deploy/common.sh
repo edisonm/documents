@@ -65,7 +65,7 @@ config_init () {
     apt-get remove --yes --purge os-prober
     
     # printf "%s\n%s\n" "$KEY_" "$KEY_" | passwd root
-    printf "%s\n%s\n${FULLNAME}\n\n\n\n\nY\n" "$KEY_" "$KEY_" | adduser $USERNAME
+    ( printf "%s\n%s\n${FULLNAME}\n\n\n\n\nY\n" "$KEY_" "$KEY_" | adduser $USERNAME ) || true
     usermod -aG sudo $USERNAME
     apt-get install --yes sudo
     apt-get install --yes btrfs-progs debconf-utils linux-image-`dpkg --print-architecture`
