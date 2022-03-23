@@ -55,6 +55,19 @@ DISKLAYOUT=singboot
 # DISKLAYOUT=wipeout
 # DISKLAYOUT=raid10
 
+# Unit where you will install Debian, valid for those uni-disk layouts:
+# DISK=/dev/mmcblk0
+# DISK=/dev/nvme0n1
+# DISK=/dev/vda
+DISK=/dev/sda
+# DISK=/dev/sdb
+
+# Units for raid10:
+DISK1=/dev/sda
+DISK2=/dev/sdb
+DISK3=/dev/sdc
+DISK4=/dev/sdd
+
 # Enable if you are attempting to continue an incomplete installation
 # RESUMING=yes
 
@@ -148,12 +161,6 @@ psep () {
 }
 
 setenv_singdual () {
-    # Unit where you will install Debian
-    # DISK=/dev/mmcblk0
-    # DISK=/dev/nvme0n1
-    # DISK=/dev/vda
-    DISK=/dev/sda
-    # DISK=/dev/sdb
     PSEP=`psep ${DISK}`
     PARTUEFI=${DISK}${PSEP}${SUFFUEFI}
     PARTBOOT=${DISK}${PSEP}${SUFFBOOT}
@@ -191,11 +198,6 @@ setenv_dualboot4 () {
 }
 
 setenv_raid10 () {
-    DISK1=/dev/sda
-    DISK2=/dev/sdb
-    DISK3=/dev/sdc
-    DISK4=/dev/sdd
-
     SUFFUEFI=2
     SUFFBOOT=3
     SUFFROOT=4
@@ -814,7 +816,9 @@ inspkg_encryption () {
         apt-get install --yes ${ENCPACKS}
         if [ "$TPMVERSION" == "1" ] ; then
             /usr/sbin/tcsd
-            /usr/sbin/tpm_takeownership -y -z || true
+            /usr/sbin/tpm_takeownership -y -z \
+                || ( echo "WARNING: tpm failure, continuing without TPM, check BIOS settings" ; \
+                     TPMVERSION="" )
         fi
     fi
 }
