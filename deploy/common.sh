@@ -18,43 +18,71 @@ ask_key () {
 }
 
 bind_dirs () {
-    mount --rbind /dev  ${ROOTDIR}/dev
-    mount --rbind /proc ${ROOTDIR}/proc
-    mount --rbind /sys  ${ROOTDIR}/sys
-    mount --rbind /run  ${ROOTDIR}/run
-    mount --rbind /tmp  ${ROOTDIR}/tmp
+    mount --bind /dev  ${ROOTDIR}/dev
+    mount --bind /proc ${ROOTDIR}/proc
+    mount --bind /sys  ${ROOTDIR}/sys
+    mount --bind /run  ${ROOTDIR}/run
+    mount --bind /tmp  ${ROOTDIR}/tmp
 }
 
 unbind_dirs () {
-    umount -l ${ROOTDIR}/dev
-    umount -l ${ROOTDIR}/proc
-    umount -l ${ROOTDIR}/sys
-    umount -l ${ROOTDIR}/run
-    umount -l ${ROOTDIR}/tmp
+    umount ${ROOTDIR}/dev
+    umount ${ROOTDIR}/proc
+    umount ${ROOTDIR}/sys
+    umount ${ROOTDIR}/run
+    umount ${ROOTDIR}/tmp
 }
 
 config_aptcacher () {
     if [ "$APTCACHER" != "" ] ; then
+        mkdir -p ${1}/etc/apt/apt.conf.d/
         echo 'Acquire::http { Proxy "http://'${APTCACHER}':3142"; }' \
              > ${1}/etc/apt/apt.conf.d/01proxy
     fi
 }
 
 setup_apt () {
-    cat <<'EOF' > ${ROOTDIR}/etc/apt/sources.list
-deb http://deb.debian.org/debian bullseye main contrib
-deb-src http://deb.debian.org/debian bullseye main contrib
+    setup_apt_${DISTRO}
+}
 
-deb http://security.debian.org/debian-security bullseye-security main contrib
-deb-src http://security.debian.org/debian-security bullseye-security main contrib
+setup_apt_debian () {
+    cat <<'EOF' | sed -e s:'<VERSNAME>':"${VERSNAME}":g \
+                      > ${ROOTDIR}/etc/apt/sources.list
+deb http://deb.debian.org/debian <VERSNAME> main contrib
+deb-src http://deb.debian.org/debian <VERSNAME> main contrib
 
-deb http://deb.debian.org/debian bullseye-updates main contrib
-deb-src http://deb.debian.org/debian bullseye-updates main contrib
+deb http://security.debian.org/debian-security <VERSNAME>-security main contrib
+deb-src http://security.debian.org/debian-security <VERSNAME>-security main contrib
+
+deb http://deb.debian.org/debian <VERSNAME>-updates main contrib
+deb-src http://deb.debian.org/debian <VERSNAME>-updates main contrib
 EOF
-    cat <<'EOF' > ${ROOTDIR}/etc/apt/sources.list.d/bullseye-backport.list
-deb http://deb.debian.org/debian bullseye-backports main contrib
-deb-src http://deb.debian.org/debian bullseye-backports main contrib
+
+    cat <<'EOF' | sed -e s:'<VERSNAME>':"${VERSNAME}":g \
+                      > ${ROOTDIR}/etc/apt/sources.list.d/${VERSNAME}-backport.list
+deb http://deb.debian.org/debian <VERSNAME>-backports main contrib
+deb-src http://deb.debian.org/debian <VERSNAME>-backports main contrib
 EOF
+}
+
+setup_apt_ubuntu () {
+    cat <<'EOF' | sed -e s:'<VERSNAME>':"${VERSNAME}":g \
+                      > ${ROOTDIR}/etc/apt/sources.list
+deb     http://archive.ubuntu.com/ubuntu <VERSNAME> main restricted universe multiverse
+deb-src http://archive.ubuntu.com/ubuntu <VERSNAME> main restricted universe multiverse
+
+deb     http://archive.ubuntu.com/ubuntu <VERSNAME>-updates main restricted universe multiverse
+deb-src http://archive.ubuntu.com/ubuntu <VERSNAME>-updates main restricted universe multiverse
+
+deb     http://archive.ubuntu.com/ubuntu <VERSNAME>-security main restricted universe multiverse
+deb-src http://archive.ubuntu.com/ubuntu <VERSNAME>-security main restricted universe multiverse
+EOF
+}
+
+config_admin () {
+    ( printf "%s\n%s\n${FULLNAME}\n\n\n\n\nY\n" "$KEY_" "$KEY_" | adduser $USERNAME ) || true
+    usermod -aG sudo $USERNAME
+    # printf "%s\n%s\n" "$KEY_" "$KEY_" | passwd root
 }
 
 config_init () {
@@ -63,12 +91,12 @@ config_init () {
     fi
     # os-prober is needed only on dual-boot systems:
     apt-get remove --yes --purge os-prober
-    
-    # printf "%s\n%s\n" "$KEY_" "$KEY_" | passwd root
-    ( printf "%s\n%s\n${FULLNAME}\n\n\n\n\nY\n" "$KEY_" "$KEY_" | adduser $USERNAME ) || true
-    usermod -aG sudo $USERNAME
-    apt-get install --yes sudo
-    apt-get install --yes btrfs-progs debconf-utils linux-image-`dpkg --print-architecture`
+    apt-get install --yes sudo btrfs-progs
+    if [ "$DISTRO" == "debian" ] ; then
+        apt-get install --yes debconf-utils linux-image-`dpkg --print-architecture`
+    elif [ "$DISTRO" == "ubuntu" ] ; then
+        apt-get install --yes debconf-i18n linux-image-generic
+    fi
     echo "Installing extra packages"
     apt-get install --yes $DEBPACKS
 }
@@ -92,10 +120,14 @@ config_initpacks () {
       echo "keyboard-configuration keyboard-configuration/variant    select English (US)" ; \
       ) | debconf-set-selections -v
     apt-get install --yes locales console-setup
-    dpkg-reconfigure locales tzdata keyboard-configuration console-setup -f noninteractive
+    if [ "${DISTRO}" == debian ] ; then
+        dpkg-reconfigure locales tzdata keyboard-configuration console-setup -f noninteractive
+    elif [ "${DISTRO}" == ubuntu ] ; then
+        dpkg-reconfigure locales tzdata keyboard-configuration console-setup
+    fi
     apt-get install --yes mdadm
 }
 
-unpack_debian () {
-    debootstrap bullseye ${ROOTDIR}
+unpack_distro () {
+    debootstrap ${VERSNAME} ${ROOTDIR}
 }

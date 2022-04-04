@@ -6,7 +6,7 @@
 
 # 2021-05-03 by Edison Mera
 
-# Script to automate deployment of Debian 11 (bullseye) in several scenarios
+# Script to automate deployment of Debian/Ubuntu in several scenarios
 
 # Assumptions: this will be used in a VM of 32GB of storage, 8GB RAM, it should
 # support UEFI, the root fs will be a btrfs encrypted via LUKS, password-less
@@ -23,6 +23,8 @@
 USERNAME=admin
 FULLNAME="Administrative Account"
 DESTNAME=debian4
+DISTRO=debian
+VERSNAME=bullseye
 # APT Cache Server, leave it empty to disable:
 # APTCACHER=10.8.0.1
 
@@ -136,7 +138,7 @@ do_make_bootefipar () {
     # BIOS booting:
     sgdisk -a1 -n${SUFFBIOS}:24K:+1000K -t${SUFFBIOS}:EF02 $1
     # UEFI booting:
-    sgdisk     -n${SUFFUEFI}:1M:+512M   -t${SUFFUEFI}:EF00 $1
+    sgdisk     -n${SUFFUEFI}:1M:+1G     -t${SUFFUEFI}:EF00 $1
     mkdosfs -F 32 -s 1 -n EFI ${1}`psep ${1}`${SUFFUEFI}
 }
 
@@ -366,8 +368,8 @@ build_partitions () {
 }
 
 setup_aptinstall () {
-    echo "deb http://deb.debian.org/debian bullseye main contrib"            > /etc/apt/sources.list
-    # echo "deb http://deb.debian.org/debian buster-backports main contrib" >> /etc/apt/sources.list
+    echo "deb http://deb.debian.org/debian ${VERSNAME} main contrib"         > /etc/apt/sources.list
+    # echo "deb http://deb.debian.org/debian ${VERSNAME}-backports main contrib" >> /etc/apt/sources.list
     apt-get update --yes
     apt-get install --yes debootstrap curl net-tools efibootmgr
 }
@@ -835,6 +837,7 @@ do_chroot () {
     config_suspend
     update-grub
     config_init
+    config_admin
     update-initramfs -c -k all
 }
 
@@ -866,7 +869,7 @@ wipeout () {
     skip_if_resuming \
         build_partitions
     mount_partitions
-    exec_once unpack_debian
+    exec_once unpack_distro
     setup_apt
     setup_hostname
     setup_nic

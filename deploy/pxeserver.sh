@@ -1,46 +1,50 @@
 #!/bin/bash
 
-. ./common.sh
+. `dirname $0`/common.sh
 
 USERNAME=admin
 FULLNAME="Administrative Account"
-DESTNAME=worker6
+DISTRO=ubuntu
+VERSNAME=focal
+DESTNAME=${VERSNAME}
 # APT Cache Server, leave it empty to disable:
-APTCACHER=10.8.0.1
-
-NADDRESS='10.8.0'
+APTCACHER=192.168.11.6
+# Kludge: hardwiring the DNS sever in order to get the hostname from there
+DNSSERVER=192.168.11.6
+NADDRESS='192.168.11'
 CLIENTIP=${NADDRESS}'.*'
-DHCPIP=${NADDRESS}'.1'
 SERVERIPS=`hostname -I`
 SERVERIP=`( for i in ${SERVERIPS} ; do echo ${i} ; done ) | grep ${NADDRESS}`
 BASEDIR=/srv/nfs4/pxe/${DESTNAME}
 ROOTDIR=${BASEDIR}/root
 ROOTMODE=ro
-if [ ! -f /etc/default/tftpd-hpa ] ; then
-    apt install tftpd-hpa
-fi
-TFTPROOT=`grep TFTP_DIRECTORY /etc/default/tftpd-hpa|sed 's/TFTP_DIRECTORY=\"\(.*\)\"/\1/g'`
+
+# Don't make this complicated, we just hardwire TFTPROOT:
+# TFTPROOT=`grep TFTP_DIRECTORY /etc/default/tftpd-hpa|sed 's/TFTP_DIRECTORY=\"\(.*\)\"/\1/g'`
+TFTPROOT=/srv/tftp
 TFTPDIR=${TFTPROOT}/${DESTNAME}
 
 pxeserver () {
     
-    if [ -d ${ROOTDIR} ] ; then
+    if [ -d ${ROOTDIR}/etc/apt/sources.list.d ] ; then
         FIRST=0
     else
         FIRST=1
     fi
 
-    mkdir -p ${ROOTDIR}/etc/apt ${BASEDIR}/home ${TFTPDIR}/boot
+    apt install -y debootstrap pxelinux nfs-kernel-server tftpd-hpa
+
+    mkdir -p ${ROOTDIR}/etc/apt/sources.list.d ${BASEDIR}/home \
+          ${ROOTDIR}/home ${ROOTDIR}/boot ${TFTPDIR}/boot
     setup_apt
     config_aptcacher ${ROOTDIR}
     config_vmlinuz
     
     if [ "${FIRST}" == 1 ] ; then
-        set_key
         mount_partitions
-        unpack_debian
+        unpack_distro
         bind_dirs
-        config_chroot do_chroot_pxe
+        config_chroot /tmp/pxeserver.sh do_chroot_pxe
         unbind_dirs
         unmount_partitions
     fi
@@ -48,8 +52,25 @@ pxeserver () {
     config_fstab_pxe
     config_overlay
     setup_pxe
-    rm -f ${ROOTDIR}/etc/hostname ${ROOTDIR}/etc/hosts ${ROOTDIR}/etc/network/interfaces.d/*
+    cleanup_guest_files
     systemctl restart nfs-kernel-server
+}
+
+rescue () {
+    mount_partitions
+    bind_dirs
+    config_chroot
+    unbind_dirs
+    unmount_partitions
+}
+
+cleanup_guest_files () {
+    rm -f ${ROOTDIR}/etc/hostname ${ROOTDIR}/etc/hosts ${ROOTDIR}/etc/network/interfaces.d/*
+}
+
+config_chroot () {
+    cp pxeserver.sh common.sh ${ROOTDIR}/tmp/
+    chroot ${ROOTDIR} $*
 }
 
 mount_partitions () {
@@ -71,6 +92,9 @@ setup_pxe () {
     ln -f /usr/lib/syslinux/modules/bios/ldlinux.c32 ${TFTPDIR}/ldlinux.c32
     ln -f /usr/lib/syslinux/modules/bios/menu.c32    ${TFTPDIR}/menu.c32
     ln -f /usr/lib/syslinux/modules/bios/libutil.c32 ${TFTPDIR}/libutil.c32
+
+    chown tftp:tftp -R ${TFTPDIR}
+    chmod go+rX     -R ${TFTPDIR}
     
     RELEASE="$(echo `lsb_release -irs`)"
     
@@ -160,7 +184,10 @@ OVERDIR=/usr/local/ovrfs
 
 config_overlay () {
     # Source: https://github.com/hansrune/domoticz-contrib/blob/master/utils/mount_overlay
-    cat <<'EOF' | sed -e 's:<OVERDIR>:'${OVERDIR}':g' > ${ROOTDIR}/usr/local/bin/ovrfs
+    mkdir -p ${ROOTDIR}/usr/local/bin
+    cat <<'EOF' | sed -e s:'<OVERDIR>':"${OVERDIR}":g \
+                      -e s:'<DNSSERVER>':"${DNSSERVER}":g \
+                      > ${ROOTDIR}/usr/local/bin/ovrfs
 #!/bin/sh
 
 OVERDIR=<OVERDIR>
@@ -185,8 +212,8 @@ if [ "${DIR}" = "/etc" ] ; then
     # As soon as /etc is writable, fix hostname and nic:
     setup_hostname () {
 	ipaddr=`hostname -I`
-	fqdn=`hostname -f`
-	hostname=`hostname`
+	fqdn=`host ${ipaddr} <DNSSERVER>|awk '{print $5}'|sed -e s/.$//g`
+	hostname=${fqdn%%.*}
 	echo ${hostname} > /etc/hostname
 	( echo "127.0.0.1	localhost" ; \
 	  echo "::1		localhost ip6-localhost ip6-loopback" ; \
@@ -214,7 +241,6 @@ EOF
     chmod a+rx ${ROOTDIR}/usr/local/bin/ovrfs
 }
 
-
 config_fstab_pxe () {
     ( echo "/dev/nfs                    /     nfs   tcp,nolock      0  0" ; \
       echo "tmpfs                       /tmp  tmpfs nodev,nosuid    0  0" ; \
@@ -228,7 +254,7 @@ config_fstab_pxe () {
 
 do_chroot_pxe () {
     config_initpacks
-    apt-get install --yes nfs-common fuse lsof
+    apt-get install --yes nfs-common fuse lsof bind9-host
     # apt-get --yes purge connman
     # apt-get --yes autoremove
     config_suspend
@@ -237,6 +263,7 @@ do_chroot_pxe () {
 }
 
 config_vmlinuz () {
+    mkdir -p ${ROOTDIR}/etc/initramfs-tools/hooks
     cat <<'EOF' > ${ROOTDIR}/etc/initramfs-tools/hooks/vmlinuz
 #!/bin/sh
 

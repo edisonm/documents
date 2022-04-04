@@ -160,8 +160,8 @@ setup_hostname () {
       ) > /mnt/etc/hosts
 }
 
-unpack_debian () {
-    debootstrap buster /mnt
+unpack_distro () {
+    debootstrap ${VERSNAME} /mnt
 }
 
 mount_partitions () {
@@ -476,6 +476,7 @@ do_chroot () {
     config_crypttab
     update-grub
     config_init
+    config_admin
 }
 
 unmount_partitions () {
@@ -494,7 +495,7 @@ all () {
     setup_aptinstall
     build_partitions
     mount_partitions
-    unpack_debian
+    unpack_distro
     setup_apt
     setup_hostname
     setup_nic
