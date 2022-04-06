@@ -12,12 +12,14 @@ APTCACHER=192.168.11.6
 # Kludge: hardwiring the DNS sever in order to get the hostname from there
 DNSSERVER=192.168.11.6
 NADDRESS='192.168.11'
-CLIENTIP=${NADDRESS}'.*'
+CLIENTIP=${NADDRESS}'.0/24'
+PXESERVER=`hostname`
 SERVERIPS=`hostname -I`
 SERVERIP=`( for i in ${SERVERIPS} ; do echo ${i} ; done ) | grep ${NADDRESS}`
 BASEDIR=/srv/nfs4/pxe/${DESTNAME}
 ROOTDIR=${BASEDIR}/root
-ROOTMODE=ro
+# Client that is allowed to read/write the nfs share files
+RWCLIENT=192.168.11.101
 
 # Don't make this complicated, we just hardwire TFTPROOT:
 # TFTPROOT=`grep TFTP_DIRECTORY /etc/default/tftpd-hpa|sed 's/TFTP_DIRECTORY=\"\(.*\)\"/\1/g'`
@@ -32,7 +34,7 @@ pxeserver () {
         FIRST=1
     fi
 
-    apt install -y debootstrap pxelinux nfs-kernel-server tftpd-hpa
+    apt install -y debootstrap pxelinux nfs-kernel-server tftpd-hpa syslinux-utils
 
     mkdir -p ${ROOTDIR}/etc/apt/sources.list.d ${BASEDIR}/home \
           ${ROOTDIR}/home ${ROOTDIR}/boot ${TFTPDIR}/boot
@@ -97,18 +99,30 @@ setup_pxe () {
     chmod go+rX     -R ${TFTPDIR}
     
     RELEASE="$(echo `lsb_release -irs`)"
+
+    rm -f /etc/exports.d/${DESTNAME}.exports
+    setup_pxe_each ${RWCLIENT} rw ${TFTPDIR}/pxelinux.cfg/`gethostip ${RWCLIENT}|awk '{print $3}'`
+    setup_pxe_each ${CLIENTIP} ro ${TFTPDIR}/pxelinux.cfg/default
+    ( echo "${BASEDIR}/home ${CLIENTIP}(rw,async,no_subtree_check)" ) \
+        >> /etc/exports.d/${DESTNAME}.exports
     
-    ( echo "${TFTPDIR}/boot ${CLIENTIP}(${ROOTMODE},async,no_subtree_check,no_root_squash,no_all_squash)" ; \
-      echo "${ROOTDIR} ${CLIENTIP}(${ROOTMODE},async,no_subtree_check,no_root_squash,no_all_squash)" ; \
-      echo "${BASEDIR}/home ${CLIENTIP}(rw,async,no_subtree_check)" ) \
-        > /etc/exports.d/${DESTNAME}.exports
-    
+}
+
+setup_pxe_each () {
+    DESTADDR=$1
+    ROOTMODE=$2
+    DESTFILE=$3
+
+    ( echo "${TFTPDIR}/boot ${DESTADDR}(${ROOTMODE},async,no_subtree_check,no_root_squash,no_all_squash)" ; \
+      echo "${ROOTDIR} ${DESTADDR}(${ROOTMODE},async,no_subtree_check,no_root_squash,no_all_squash)" ) \
+        >> /etc/exports.d/${DESTNAME}.exports
+
     cat <<'EOF' | sed -e s:'<DESTNAME>':"${DESTNAME}":g \
                       -e s:'<RELEASE>':"${RELEASE}":g \
                       -e s:'<SERVERIP>':"${SERVERIP}":g \
                       -e s:'<ROOTDIR>':"${ROOTDIR}":g \
                       -e s:'<ROOTMODE>':"${ROOTMODE}":g \
-                      > ${TFTPDIR}/pxelinux.cfg/default
+                      > ${DESTFILE}
 DEFAULT menu.c32
 TIMEOUT 50
 ONTIMEOUT RELEASE
@@ -162,7 +176,7 @@ EOF
                           -e s:'<ROOTMODE>':"${ROOTMODE}":g \
                           -e s:'<VERSION>':"${VERSION}":g \
                           -e s:'<LABEL>':"${LABEL}":g \
-                          >> ${TFTPDIR}/pxelinux.cfg/default
+                          >> ${DESTFILE}
 
 LABEL <LABEL>
 MENU LABEL Linux <VERSION>
@@ -177,16 +191,19 @@ APPEND ip=dhcp root=/dev/nfs nfsroot=<SERVERIP>:<ROOTDIR> <ROOTMODE> single init
 EOF
         LABEL=$(($LABEL+1))
     done
-    echo "MENU END" >> ${TFTPDIR}/pxelinux.cfg/default
+    echo "MENU END" >> ${DESTFILE}
 }
 
 OVERDIR=/usr/local/ovrfs
 
 config_overlay () {
     # Source: https://github.com/hansrune/domoticz-contrib/blob/master/utils/mount_overlay
+    # Note: at this stage we should use SEVERIP instead of PXESERVER, otherwise it will not work
     mkdir -p ${ROOTDIR}/usr/local/bin
     cat <<'EOF' | sed -e s:'<OVERDIR>':"${OVERDIR}":g \
                       -e s:'<DNSSERVER>':"${DNSSERVER}":g \
+                      -e s:'<SERVERIP>':"${SERVERIP}":g \
+                      -e s:'<ROOTDIR>':"${ROOTDIR}":g \
                       > ${ROOTDIR}/usr/local/bin/ovrfs
 #!/bin/sh
 
@@ -206,13 +223,16 @@ if [ "$ROOT_MOUNT" = "ro" ] ; then
     /bin/mkdir -p ${OVERDIR}${DIR}/work
     OPTS="-o lowerdir=${DIR},upperdir=${OVERDIR}${DIR}/upper,workdir=${OVERDIR}${DIR}/work"
     /bin/mount -t overlay ${OPTS} overlay ${DIR}
+else
+    # kludge to let ${DIR} be identified as successfully mounted
+    /bin/mount -t nfs <SERVERIP>:<ROOTDIR>${DIR} ${DIR}
 fi
 
 if [ "${DIR}" = "/etc" ] ; then
     # As soon as /etc is writable, fix hostname and nic:
     setup_hostname () {
 	ipaddr=`hostname -I`
-	fqdn=`host ${ipaddr} <DNSSERVER>|awk '{print $5}'|sed -e s/.$//g`
+	fqdn=`host ${ipaddr} <DNSSERVER>|tail -n 1|awk '{print $5}'|sed -e s/.$//g`
 	hostname=${fqdn%%.*}
 	echo ${hostname} > /etc/hostname
 	( echo "127.0.0.1	localhost" ; \
@@ -221,6 +241,7 @@ if [ "${DIR}" = "/etc" ] ; then
 	  echo "ff02::2		ip6-allrouters" ; \
 	  echo "${ipaddr} ${fqdn} ${hostname}" ; \
 	  ) > /etc/hosts
+        hostname ${hostname}
     }
     setup_nic () {
 	for nic in `ls /sys/class/net` ; do
@@ -246,8 +267,8 @@ config_fstab_pxe () {
       echo "tmpfs                       /tmp  tmpfs nodev,nosuid    0  0" ; \
       echo "ovrfs                       /etc  fuse  nofail,defaults 0  0" ; \
       echo "ovrfs                       /var  fuse  nofail,defaults 0  0" ; \
-      echo "${SERVERIP}:${TFTPDIR}/boot /boot nfs   ${ROOTMODE},tcp,nolock   0  0" ; \
-      echo "${SERVERIP}:${BASEDIR}/home /home nfs   rw,tcp,nolock   0  0" ; \
+      echo "${PXESERVER}:${TFTPDIR}/boot /boot nfs  tcp,nolock      0  0" ; \
+      echo "${PXESERVER}:${BASEDIR}/home /home nfs  tcp,nolock      0  0" ; \
       ) > ${ROOTDIR}/etc/fstab
     mkdir -p ${ROOTDIR}${OVERDIR}/etc ${ROOTDIR}${OVERDIR}/var
 }
@@ -259,6 +280,8 @@ do_chroot_pxe () {
     # apt-get --yes autoremove
     config_suspend
     config_init
+    apt update
+    apt --yes full-upgrade
     update-initramfs -c -k all
 }
 
