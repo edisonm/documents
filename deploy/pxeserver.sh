@@ -4,40 +4,60 @@
 
 USERNAME=admin
 FULLNAME="Administrative Account"
-DISTRO=ubuntu
-VERSNAME=focal
+# Distribution
+DISTRO=debian
+# DISTRO=ubuntu
+# Distribution version
+VERSNAME=bullseye
+# VERSNAME=focal
+
+# Destination subfolder to be shared among clients
 DESTNAME=${VERSNAME}
+
+# local network settings:
 # APT Cache Server, leave it empty to disable:
-APTCACHER=192.168.11.6
+APTCACHER=10.8.0.2
 # Kludge: hardwiring the DNS sever in order to get the hostname from there
-DNSSERVER=192.168.11.6
-NADDRESS='192.168.11'
+DNSSERVER=10.8.0.2
+# Network address
+NADDRESS=10.8.0
+# Client's IP allowed to read/write the nfs share files
+RWCLIENT="10.8.0.101"
+# Persistent clients, overlay will be stored permanently, it does not apply to RWCLIENT. TBD: is not working yet
+#PERSCLIENTS="pxeclient2 pxeclient3"
+
+# APTCACHER=192.168.11.6
+# DNSSERVER=192.168.11.6
+# NADDRESS='192.168.11'
+# RWCLIENT=192.168.11.101
+# PERSCLIENTS=""
+
+# PATH where overlay will be stored, we use home since it is writeable
+OVERDIR=/var/overlay
+
 CLIENTIP=${NADDRESS}'.0/24'
 PXESERVER=`hostname`
 SERVERIPS=`hostname -I`
 SERVERIP=`( for i in ${SERVERIPS} ; do echo ${i} ; done ) | grep ${NADDRESS}`
 BASEDIR=/srv/nfs4/pxe/${DESTNAME}
 ROOTDIR=${BASEDIR}/root
-# Client that is allowed to read/write the nfs share files
-RWCLIENT=192.168.11.101
 
-# Don't make this complicated, we just hardwire TFTPROOT:
+# Don't make this complicated, just hardwire TFTPROOT:
 # TFTPROOT=`grep TFTP_DIRECTORY /etc/default/tftpd-hpa|sed 's/TFTP_DIRECTORY=\"\(.*\)\"/\1/g'`
 TFTPROOT=/srv/tftp
 TFTPDIR=${TFTPROOT}/${DESTNAME}
 
 pxeserver () {
-    
-    if [ -d ${ROOTDIR}/etc/apt/sources.list.d ] ; then
+    if [ -d ${ROOTDIR}/etc/init.d ] ; then
         FIRST=0
     else
         FIRST=1
     fi
-
     apt install -y debootstrap pxelinux nfs-kernel-server tftpd-hpa syslinux-utils
-
     mkdir -p ${ROOTDIR}/etc/apt/sources.list.d ${BASEDIR}/home \
           ${ROOTDIR}/home ${ROOTDIR}/boot ${TFTPDIR}/boot
+    # Just propagate the permissions, so that the user/group ids are preserved
+    cp /etc/passwd /etc/group /etc/shadow ${ROOTDIR}/etc/
     setup_apt
     config_aptcacher ${ROOTDIR}
     config_vmlinuz
@@ -101,11 +121,20 @@ setup_pxe () {
     RELEASE="$(echo `lsb_release -irs`)"
 
     rm -f /etc/exports.d/${DESTNAME}.exports
+    
     setup_pxe_each ${RWCLIENT} rw ${TFTPDIR}/pxelinux.cfg/`gethostip ${RWCLIENT}|awk '{print $3}'`
     setup_pxe_each ${CLIENTIP} ro ${TFTPDIR}/pxelinux.cfg/default
-    ( echo "${BASEDIR}/home ${CLIENTIP}(rw,async,no_subtree_check)" ) \
-        >> /etc/exports.d/${DESTNAME}.exports
-    
+    dump_overlay_exports >> /etc/exports.d/${DESTNAME}.exports
+}
+
+dump_overlay_exports () {
+    for persclient in ${PERSCLIENTS} ; do
+        for subfs in /etc /var ; do
+            echo "${BASEDIR}${OVERDIR}/${persclient}${subfs}/ovrfs ${persclient}(rw,async,no_subtree_check,no_root_squash,no_all_squash)"
+        done
+    done
+    echo "${BASEDIR}/home ${CLIENTIP}(rw,async,no_subtree_check)"
+        
 }
 
 setup_pxe_each () {
@@ -124,7 +153,7 @@ setup_pxe_each () {
                       -e s:'<ROOTMODE>':"${ROOTMODE}":g \
                       > ${DESTFILE}
 DEFAULT menu.c32
-TIMEOUT 50
+TIMEOUT 20
 ONTIMEOUT RELEASE
 PROMPT 0
 
@@ -194,21 +223,25 @@ EOF
     echo "MENU END" >> ${DESTFILE}
 }
 
-OVERDIR=/usr/local/ovrfs
-
 config_overlay () {
     # Source: https://github.com/hansrune/domoticz-contrib/blob/master/utils/mount_overlay
     # Note: at this stage we should use SEVERIP instead of PXESERVER, otherwise it will not work
     mkdir -p ${ROOTDIR}/usr/local/bin
     cat <<'EOF' | sed -e s:'<OVERDIR>':"${OVERDIR}":g \
+                      -e s:'<PERSCLIENTS>':"${PERSCLIENTS}":g \
                       -e s:'<DNSSERVER>':"${DNSSERVER}":g \
                       -e s:'<SERVERIP>':"${SERVERIP}":g \
+                      -e s:'<BASEDIR>':"${BASEDIR}":g \
                       -e s:'<ROOTDIR>':"${ROOTDIR}":g \
                       > ${ROOTDIR}/usr/local/bin/ovrfs
 #!/bin/sh
 
-OVERDIR=<OVERDIR>
 DIR="$1"
+PERSCLIENTS="<PERSCLIENTS>"
+ROOTDIR="<ROOTDIR>"
+BASEDIR="<BASEDIR>"
+OVERDIR="<OVERDIR>"
+SERVERIP="<SERVERIP>"
 
 [ -z "${DIR}" ] && exit 1
 #
@@ -216,24 +249,29 @@ DIR="$1"
 #
 
 ROOT_MOUNT=$( awk '$2=="/" { print substr($4,1,2) }' /proc/mounts )
+ipaddr=`hostname -I`
+fqdn=`host ${ipaddr} <DNSSERVER>|tail -n 1|awk '{print $5}'|sed -e s/.$//g`
+hostname=${fqdn%%.*}
+hostname ${hostname}
 
 if [ "$ROOT_MOUNT" = "ro" ] ; then
-    /bin/mount -t tmpfs tmpfs ${OVERDIR}${DIR}
-    /bin/mkdir -p ${OVERDIR}${DIR}/upper
-    /bin/mkdir -p ${OVERDIR}${DIR}/work
-    OPTS="-o lowerdir=${DIR},upperdir=${OVERDIR}${DIR}/upper,workdir=${OVERDIR}${DIR}/work"
-    /bin/mount -t overlay ${OPTS} overlay ${DIR}
+    if [ "`echo ${PERSCLIENTS} | /bin/grep $hostname`" = "" ] ; then
+        /bin/mount -t tmpfs tmpfs ${OVERDIR}${DIR}
+        /bin/mkdir -p ${OVERDIR}${DIR}/upper
+        /bin/mkdir -p ${OVERDIR}${DIR}/work
+        OPTS="-o lowerdir=${DIR},upperdir=${OVERDIR}${DIR}/upper,workdir=${OVERDIR}${DIR}/work"
+        /bin/mount -t overlay ${OPTS} overlay ${DIR}
+    else
+        /bin/mount -t nfs -o nfsvers=3 ${SERVERIP}:${BASEDIR}${OVERDIR}/${hostname}${DIR}/ovrfs ${DIR}
+    fi
 else
     # kludge to let ${DIR} be identified as successfully mounted
-    /bin/mount -t nfs <SERVERIP>:<ROOTDIR>${DIR} ${DIR}
+    /bin/mount -t nfs ${SERVERIP}:${ROOTDIR}${DIR} ${DIR}
 fi
 
 if [ "${DIR}" = "/etc" ] ; then
     # As soon as /etc is writable, fix hostname and nic:
     setup_hostname () {
-	ipaddr=`hostname -I`
-	fqdn=`host ${ipaddr} <DNSSERVER>|tail -n 1|awk '{print $5}'|sed -e s/.$//g`
-	hostname=${fqdn%%.*}
 	echo ${hostname} > /etc/hostname
 	( echo "127.0.0.1	localhost" ; \
 	  echo "::1		localhost ip6-localhost ip6-loopback" ; \
@@ -241,7 +279,6 @@ if [ "${DIR}" = "/etc" ] ; then
 	  echo "ff02::2		ip6-allrouters" ; \
 	  echo "${ipaddr} ${fqdn} ${hostname}" ; \
 	  ) > /etc/hosts
-        hostname ${hostname}
     }
     setup_nic () {
 	for nic in `ls /sys/class/net` ; do
@@ -267,10 +304,21 @@ config_fstab_pxe () {
       echo "tmpfs                       /tmp  tmpfs nodev,nosuid    0  0" ; \
       echo "ovrfs                       /etc  fuse  nofail,defaults 0  0" ; \
       echo "ovrfs                       /var  fuse  nofail,defaults 0  0" ; \
-      echo "${PXESERVER}:${TFTPDIR}/boot /boot nfs  tcp,nolock      0  0" ; \
-      echo "${PXESERVER}:${BASEDIR}/home /home nfs  tcp,nolock      0  0" ; \
+      echo "${SERVERIP}:${TFTPDIR}/boot /boot nfs  tcp,nolock       0  0" ; \
+      echo "${SERVERIP}:${BASEDIR}/home /home nfs  tcp,nolock       0  0" ; \
       ) > ${ROOTDIR}/etc/fstab
     mkdir -p ${ROOTDIR}${OVERDIR}/etc ${ROOTDIR}${OVERDIR}/var
+}
+
+config_fstab_srv () {
+    echo "# add these lines to your /etc/fstab"
+    for persclient in $PERSCLIENTS ; do
+        OVERPATH=${BASEDIR}${OVERDIR}/${persclient}
+        for subfs in /etc /var ; do
+            mkdir -p ${OVERPATH}${subfs}/ovrfs ${OVERPATH}${subfs}/upper ${OVERPATH}${subfs}/work
+            echo overlay ${OVERPATH}${subfs}/ovrfs overlay nfs_export=on,lowerdir=${ROOTDIR}/etc,upperdir=${OVERPATH}${subfs}/upper,workdir=${OVERPATH}${subfs}/work 0 0
+        done
+    done
 }
 
 do_chroot_pxe () {
