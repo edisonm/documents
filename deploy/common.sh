@@ -18,6 +18,9 @@ ask_key () {
 }
 
 bind_dirs () {
+    # Against some advices on Internet, --rbind must not be used, otherwise you
+    # are forced to restart the machine after unbinding these directories, which
+    # is problematic in production machines
     mount --bind /dev  ${ROOTDIR}/dev
     mount --bind /proc ${ROOTDIR}/proc
     mount --bind /sys  ${ROOTDIR}/sys

@@ -32,7 +32,7 @@ RWCLIENT="10.8.0.101"
 # RWCLIENT=192.168.11.101
 # PERSCLIENTS=""
 
-# PATH where overlay will be stored, we use home since it is writeable
+# PATH where overlay will be stored
 OVERDIR=/var/overlay
 
 CLIENTIP=${NADDRESS}'.0/24'

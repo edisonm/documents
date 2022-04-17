@@ -26,7 +26,7 @@ DESTNAME=debian4
 DISTRO=debian
 VERSNAME=bullseye
 # APT Cache Server, leave it empty to disable:
-# APTCACHER=10.8.0.1
+APTCACHER=10.8.0.1
 
 # Specifies if the machine is encrypted:
 ENCRYPT=yes
@@ -60,8 +60,8 @@ DISKLAYOUT=singboot
 # Unit where you will install Debian, valid for those uni-disk layouts:
 # DISK=/dev/mmcblk0
 # DISK=/dev/nvme0n1
-# DISK=/dev/vda
-DISK=/dev/sda
+DISK=/dev/vda
+# DISK=/dev/sda
 # DISK=/dev/sdb
 
 # Units for raid10:
@@ -70,6 +70,22 @@ DISK2=/dev/sdb
 DISK3=/dev/sdc
 DISK4=/dev/sdd
 
+# UEFI partition size, empty for no uefi partition. Note that if is defined and
+# UEFI is not supported, the partition is still created although not used.  If
+# the system is UEFI and this is not defined, the system boot will be broken.
+
+# UEFISIZE=+1G
+
+# Boot partition size, empty for no separated boot partition
+BOOTSIZE=+2G
+
+# Root partition size, 0 for max available space
+ROOTSIZE=0
+# ROOTSIZE=+32G
+
+# Swap partition size, placed at the end
+SWAPSIZE=-4G
+
 # Enable if you are attempting to continue an incomplete installation
 # RESUMING=yes
 
@@ -77,14 +93,6 @@ ROOTDIR=${ROOTDIR:-/mnt}
 
 export DEBIAN_FRONTEND=noninteractive
 ASKPASS_='/lib/cryptsetup/askpass'
-
-if [ "${ENCRYPT}" == yes ] ; then
-    ROOTPART=/dev/mapper/crypt_root
-    SWAPPART=/dev/mapper/crypt_swap
-else
-    ROOTPART=${PARTROOT}
-    SWAPPART=${PARTSWAP}
-fi
 
 warn_confirm () {
     if [ "${RESUMING}" == "yes" ] ; then
@@ -128,54 +136,80 @@ if_else_resuming () {
     fi
 }
 
-make_bootefipar () {
-    skip_if_resuming do_make_bootefipar $*
+make_biosuefipar () {
+    skip_if_resuming do_make_biosuefipar $*
 }
 
-do_make_bootefipar () {
-    # Partition your disk(s). This scheme works for both BIOS and UEFI, so that
-    # we can switch without resizing partitions (which is a headache):
+make_biospar () {    
     # BIOS booting:
     sgdisk -a1 -n${SUFFBIOS}:24K:+1000K -t${SUFFBIOS}:EF02 $1
+}
+
+make_uefipar () {
     # UEFI booting:
-    sgdisk     -n${SUFFUEFI}:1M:+1G     -t${SUFFUEFI}:EF00 $1
-    mkdosfs -F 32 -s 1 -n EFI ${1}`psep ${1}`${SUFFUEFI}
+    sgdisk -n${UEFISUFF}:1M:${UEFISIZE} -t${UEFISUFF}:EF00 $1
+    mkdosfs -F 32 -s 1 -n EFI ${1}`psep ${1}`${UEFISUFF}
+}
+
+do_make_biosuefipar () {
+    # Partition your disk(s). This scheme works for both BIOS and UEFI, so that
+    # we can switch without resizing partitions (which is a headache):
+    make_biospar $*
+    if_uefipart make_uefipar $*
 }
 
 make_partitions () {
     skip_if_resuming do_make_partitions $*
 }
 
+if_bootpart () {
+    if [ "${BOOTSIZE}" != "" ] ; then
+        $*
+    fi
+}
+
+skip_if_bootpart () {
+    if [ "${BOOTSIZE}" = "" ] ; then
+        $*
+    fi
+}
+
+if_uefipart () {
+    if [ "${UEFISIZE}" != "" ] ; then
+        $*
+    fi
+}
+
 do_make_partitions () {
     # Boot patition:
-    sgdisk     -n${SUFFBOOT}:0:+2G -t${SUFFBOOT}:8300 $1
+    if_bootpart sgdisk -n${BOOTSUFF}:0:${BOOTSIZE} -t${BOOTSUFF}:8300 $1
+    # SWAP partition (at the end):
+    sgdisk     -n${SWAPSUFF}:${SWAPSIZE}:0 -t${SWAPSUFF}:8300 $1
     # Root partition:
-    sgdisk     -n${SUFFROOT}:0:$2  -t${SUFFROOT}:8300 $1
-    # SWAP partition:
-    sgdisk     -n${SUFFSWAP}:0:$3  -t${SUFFSWAP}:8300 $1
+    sgdisk     -n${ROOTSUFF}:0:${ROOTSIZE} -t${ROOTSUFF}:8300 $1
 }
 
 psep () {
     LASTCHDSK=${1: -1}
     if [ "${LASTCHDSK##[0-9]}" == "" ] ; then
-         echo "p"
+        echo "p"
     fi
 }
 
 setenv_singdual () {
     PSEP=`psep ${DISK}`
-    PARTUEFI=${DISK}${PSEP}${SUFFUEFI}
-    PARTBOOT=${DISK}${PSEP}${SUFFBOOT}
-    PARTROOT=${DISK}${PSEP}${SUFFROOT}
-    PARTSWAP=${DISK}${PSEP}${SUFFSWAP}
+    UEFIPART=${DISK}${PSEP}${UEFISUFF}
+    BOOTPART=${DISK}${PSEP}${BOOTSUFF}
+    ROOTPDEV=${DISK}${PSEP}${ROOTSUFF}
+    SWAPPDEV=${DISK}${PSEP}${SWAPSUFF}
 }
 
 setenv_singboot () {
     SUFFBIOS=1
-    SUFFUEFI=2
-    SUFFBOOT=3
-    SUFFROOT=4
-    SUFFSWAP=5
+    UEFISUFF=2
+    BOOTSUFF=3
+    ROOTSUFF=4
+    SWAPSUFF=5
     setenv_singdual
 }
 
@@ -184,26 +218,26 @@ setenv_wipeout () {
 }
 
 setenv_dualboot () {
-    SUFFUEFI=1
-    SUFFBOOT=4
-    SUFFROOT=5
-    SUFFSWAP=6
+    UEFISUFF=1
+    BOOTSUFF=4
+    ROOTSUFF=5
+    SWAPSUFF=6
     setenv_singdual
 }
 
 setenv_dualboot4 () {
-    SUFFUEFI=1
-    SUFFBOOT=3
-    SUFFROOT=4
-    SUFFSWAP=5
+    UEFISUFF=1
+    BOOTSUFF=3
+    ROOTSUFF=4
+    SWAPSUFF=5
     setenv_singdual
 }
 
 setenv_raid10 () {
-    SUFFUEFI=2
-    SUFFBOOT=3
-    SUFFROOT=4
-    SUFFSWAP=5
+    UEFISUFF=2
+    BOOTSUFF=3
+    ROOTSUFF=4
+    SWAPSUFF=5
 
     DISKBOOT=/dev/md0
     DISKROOT=/dev/md1
@@ -211,40 +245,47 @@ setenv_raid10 () {
 
     SUFFMD=1
 
-    PARTBOOT=${DISKBOOT}`psep ${DISKBOOT}`${SUFFMD}
-    PARTROOT=${DISKROOT}`psep ${DISKROOT}`${SUFFMD}
-    PARTSWAP=${DISKSWAP}`psep ${DISKSWAP}`${SUFFMD}
+    BOOTPART=${DISKBOOT}`psep ${DISKBOOT}`${SUFFMD}
+    ROOTPDEV=${DISKROOT}`psep ${DISKROOT}`${SUFFMD}
+    SWAPPDEV=${DISKSWAP}`psep ${DISKSWAP}`${SUFFMD}
 
     # Pick one, later you can sync the other copies
-    PARTUEFI=${DISK1}${PSEP}${SUFFUEFI}
+    UEFIPART=${DISK1}${PSEP}${UEFISUFF}
 
     PSEP1=`psep $DISK1`
     PSEP2=`psep $DISK2`
     PSEP3=`psep $DISK3`
     PSEP4=`psep $DISK4`
     
-    PARTBOOT1=${DISK1}${PSEP1}${SUFFBOOT}
-    PARTBOOT2=${DISK2}${PSEP2}${SUFFBOOT}
-    PARTBOOT3=${DISK3}${PSEP3}${SUFFBOOT}
-    PARTBOOT4=${DISK4}${PSEP4}${SUFFBOOT}
+    BOOTPART1=${DISK1}${PSEP1}${BOOTSUFF}
+    BOOTPART2=${DISK2}${PSEP2}${BOOTSUFF}
+    BOOTPART3=${DISK3}${PSEP3}${BOOTSUFF}
+    BOOTPART4=${DISK4}${PSEP4}${BOOTSUFF}
     
-    PARTROOT1=${DISK1}${PSEP1}${SUFFROOT}
-    PARTROOT2=${DISK2}${PSEP2}${SUFFROOT}
-    PARTROOT3=${DISK3}${PSEP3}${SUFFROOT}
-    PARTROOT4=${DISK4}${PSEP4}${SUFFROOT}
+    ROOTPDEV1=${DISK1}${PSEP1}${ROOTSUFF}
+    ROOTPDEV2=${DISK2}${PSEP2}${ROOTSUFF}
+    ROOTPDEV3=${DISK3}${PSEP3}${ROOTSUFF}
+    ROOTPDEV4=${DISK4}${PSEP4}${ROOTSUFF}
     
-    PARTSWAP1=${DISK1}${PSEP1}${SUFFSWAP}
-    PARTSWAP2=${DISK2}${PSEP2}${SUFFSWAP}
-    PARTSWAP3=${DISK3}${PSEP3}${SUFFSWAP}
-    PARTSWAP4=${DISK4}${PSEP4}${SUFFSWAP}
-
+    SWAPPDEV1=${DISK1}${PSEP1}${SWAPSUFF}
+    SWAPPDEV2=${DISK2}${PSEP2}${SWAPSUFF}
+    SWAPPDEV3=${DISK3}${PSEP3}${SWAPSUFF}
+    SWAPPDEV4=${DISK4}${PSEP4}${SWAPSUFF}
 }
 
 setenv_${DISKLAYOUT}
 
+if [ "${ENCRYPT}" == yes ] ; then
+    ROOTPART=/dev/mapper/crypt_root
+    SWAPPART=/dev/mapper/crypt_swap
+else
+    ROOTPART=${ROOTPDEV}
+    SWAPPART=${SWAPPDEV}
+fi
+
 singboot_partitions () {
-    make_bootefipar $DISK
-    make_partitions $DISK +32G +8G
+    make_biosuefipar $DISK
+    make_partitions $DISK
 }
 
 wipeout_partitions () {
@@ -254,24 +295,30 @@ wipeout_partitions () {
 }
 
 dualboot_partitions () {
-    make_partitions ${DISK} +32G +4G
+    make_partitions ${DISK}
 }
 
 dualboot4_partitions () {
-    make_partitions ${DISK} +32G +4G
+    make_partitions ${DISK}
 }
 
 reopen_raid10_partitions () {
     mdadm --stop --scan
-    mdadm --assemble ${DISKBOOT} $PARTBOOT1 $PARTBOOT2 $PARTBOOT3 $PARTBOOT4
-    mdadm --assemble ${DISKROOT} $PARTROOT1 $PARTROOT2 $PARTROOT3 $PARTROOT4
-    mdadm --assemble ${DISKSWAP} $PARTSWAP1 $PARTSWAP2 $PARTSWAP3 $PARTSWAP4
+    if_bootpart mdadm --assemble ${DISKBOOT} $BOOTPART1 $BOOTPART2 $BOOTPART3 $BOOTPART4
+    mdadm --assemble ${DISKROOT} $ROOTPDEV1 $ROOTPDEV2 $ROOTPDEV3 $ROOTPDEV4
+    mdadm --assemble ${DISKSWAP} $SWAPPDEV1 $SWAPPDEV2 $SWAPPDEV3 $SWAPPDEV4
 }
 
 raid10_partitions () {
     if_else_resuming \
         reopen_raid10_partitions \
         create_raid10_partitions
+}
+
+do_zerosb_bootparts () {
+    for part in $* ; do
+        mdadm --zero-superblock $part || true
+    done
 }
 
 create_raid10_partitions () {
@@ -283,30 +330,28 @@ create_raid10_partitions () {
 
     partprobe
 
-    do_make_bootefipar $DISK1
-    do_make_bootefipar $DISK2
-    do_make_bootefipar $DISK3
-    do_make_bootefipar $DISK4
+    do_make_biosuefipar $DISK1
+    do_make_biosuefipar $DISK2
+    do_make_biosuefipar $DISK3
+    do_make_biosuefipar $DISK4
 
-    do_make_partitions $DISK1 +32G +4G
-    do_make_partitions $DISK2 +32G +4G
-    do_make_partitions $DISK3 +32G +4G
-    do_make_partitions $DISK4 +32G +4G
+    do_make_partitions $DISK1
+    do_make_partitions $DISK2
+    do_make_partitions $DISK3
+    do_make_partitions $DISK4
 
     mdadm --stop --scan
-    for part in \
-        $PARTBOOT1 $PARTBOOT2 $PARTBOOT3 $PARTBOOT4 \
-                   $PARTROOT1 $PARTROOT2 $PARTROOT3 $PARTROOT4 \
-                   $PARTSWAP1 $PARTSWAP2 $PARTSWAP3 $PARTSWAP4
-    do
-        mdadm --zero-superblock $part || true
-    done
+
+    if_bootpart do_zerosb_bootparts $BOOTPART1 $BOOTPART2 $BOOTPART3 $BOOTPART4
+
+    do_zerosb_bootparts $ROOTPDEV1 $ROOTPDEV2 $ROOTPDEV3 $ROOTPDEV4 \
+                        $SWAPPDEV1 $SWAPPDEV2 $SWAPPDEV3 $SWAPPDEV4
     
     partprobe
-    
-    mdadm --create ${DISKBOOT} --level raid1 --metadata=1.0 --raid-devices 4 --force $PARTBOOT1 $PARTBOOT2 $PARTBOOT3 $PARTBOOT4
-    mdadm --create ${DISKROOT} --level raid10 --raid-devices 4 --force $PARTROOT1 $PARTROOT2 $PARTROOT3 $PARTROOT4
-    mdadm --create ${DISKSWAP} --level raid0  --raid-devices 4 --force $PARTSWAP1 $PARTSWAP2 $PARTSWAP3 $PARTSWAP4
+
+    if_bootpart mdadm --create ${DISKBOOT} --level raid1 --metadata=1.0 --raid-devices 4 --force $BOOTPART1 $BOOTPART2 $BOOTPART3 $BOOTPART4
+    mdadm --create ${DISKROOT} --level raid10 --raid-devices 4 --force $ROOTPDEV1 $ROOTPDEV2 $ROOTPDEV3 $ROOTPDEV4
+    mdadm --create ${DISKSWAP} --level raid0  --raid-devices 4 --force $SWAPPDEV1 $SWAPPDEV2 $SWAPPDEV3 $SWAPPDEV4
     
     sgdisk -n1:0:0 -t1:8300 $DISKBOOT
     sgdisk -n1:0:0 -t1:8300 $DISKROOT
@@ -318,8 +363,8 @@ open_partitions () {
         if [ "$KEY_" == "" ] ; then
             ask_key
         fi
-        printf "%s" "$KEY_"|cryptsetup luksOpen --key-file - ${PARTROOT} crypt_root
-        printf "%s" "$KEY_"|cryptsetup luksOpen --key-file - ${PARTSWAP} crypt_swap
+        printf "%s" "$KEY_"|cryptsetup luksOpen --key-file - ${ROOTPDEV} crypt_root
+        printf "%s" "$KEY_"|cryptsetup luksOpen --key-file - ${SWAPPDEV} crypt_swap
     fi
 }
 
@@ -332,8 +377,8 @@ close_partitions () {
 
 crypt_partitions () {
     if [ "${ENCRYPT}" == yes ] ; then
-        printf "%s" "$KEY_"|cryptsetup luksFormat --key-file - ${PARTROOT}
-        printf "%s" "$KEY_"|cryptsetup luksFormat --key-file - ${PARTSWAP}
+        printf "%s" "$KEY_"|cryptsetup luksFormat --key-file - ${ROOTPDEV}
+        printf "%s" "$KEY_"|cryptsetup luksFormat --key-file - ${SWAPPDEV}
     fi
 }
 
@@ -344,26 +389,26 @@ build_partitions () {
         FORCBTRFS="-f"
     fi
 
-    mkfs.ext4  ${FORCEEXT4} -L boot ${PARTBOOT}
+    if_bootpart mkfs.ext4  ${FORCEEXT4} -L boot ${BOOTPART}
     mkfs.btrfs ${FORCBTRFS} -L root ${ROOTPART}
     mkswap ${SWAPPART}
 
     mount ${ROOTPART} ${ROOTDIR}
     btrfs subvolume create ${ROOTDIR}/@
-    mkdir ${ROOTDIR}/@/home
     mkdir ${ROOTDIR}/@/boot
+    mkdir ${ROOTDIR}/@/home
     btrfs subvolume create ${ROOTDIR}/@home
 
     if [ "${ENCRYPT}" == yes ] ; then
         dd if=/dev/urandom bs=512 count=1 of=${ROOTDIR}/@/crypto_keyfile.bin
         chmod go-rw ${ROOTDIR}/@/crypto_keyfile.bin
-        printf "%s" "$KEY_"|cryptsetup luksAddKey ${PARTROOT} ${ROOTDIR}/@/crypto_keyfile.bin --key-file -
-        printf "%s" "$KEY_"|cryptsetup luksAddKey ${PARTSWAP} ${ROOTDIR}/@/crypto_keyfile.bin --key-file -
+        printf "%s" "$KEY_"|cryptsetup luksAddKey ${ROOTPDEV} ${ROOTDIR}/@/crypto_keyfile.bin --key-file -
+        printf "%s" "$KEY_"|cryptsetup luksAddKey ${SWAPPDEV} ${ROOTDIR}/@/crypto_keyfile.bin --key-file -
     fi
 
-    umount ${ROOTDIR}
-    mount ${PARTBOOT} ${ROOTDIR}
-    mkdir ${ROOTDIR}/efi
+    if_bootpart mount ${BOOTPART} ${ROOTDIR}/@/boot
+    mkdir ${ROOTDIR}/@/boot/efi
+    umount ${ROOTDIR}/@/boot
     umount ${ROOTDIR}
 }
 
@@ -399,13 +444,13 @@ setup_hostname () {
 mount_partitions () {
     mount ${ROOTPART} ${ROOTDIR} -o subvol=@
     mount ${ROOTPART} ${ROOTDIR}/home -o subvol=@home
-    mount ${PARTBOOT} ${ROOTDIR}/boot
-    mount ${PARTUEFI} ${ROOTDIR}/boot/efi
+    if_bootpart mount ${BOOTPART} ${ROOTDIR}/boot
+    if_uefipart mount ${UEFIPART} ${ROOTDIR}/boot/efi
 }
 
 unmount_partitions () {
-    umount -l ${ROOTDIR}/boot/efi
-    umount -l ${ROOTDIR}/boot
+    if_uefipart umount -l ${ROOTDIR}/boot/efi
+    if_bootpart umount -l ${ROOTDIR}/boot
     umount -l ${ROOTDIR}/home
     umount -l ${ROOTDIR}
 }
@@ -425,6 +470,24 @@ remove_grubip () {
     cp /etc/default/grub /tmp/
     # in some systems, in /etc/default/grub, a line like this could be required:
     sed -e 's/GRUB_CMDLINE_LINUX="'"ip=$IP::$GW:$MK"'"/GRUB_CMDLINE_LINUX=""/g' /tmp/grub \
+        > /etc/default/grub
+}
+
+config_grubenc () {
+    # in some systems, in /etc/default/grub, a line like this could be required:
+    if [ "`cat /etc/default/grub|grep GRUB_ENABLE_CRYPTODISK`" = "" ] ; then
+        echo "GRUB_ENABLE_CRYPTODISK=y" >>/etc/default/grub
+    else
+        cp /etc/default/grub /tmp/
+        sed -e 's/GRUB_ENABLE_CRYPTODISK=.*/GRUB_ENABLE_CRYPTODISK=""/g' /tmp/grub \
+            > /etc/default/grub
+    fi
+}
+
+remove_grubenc () {
+    # in some systems, in /etc/default/grub, a line like this could be required:
+    cp /etc/default/grub /tmp/
+    sed -e 's/GRUB_ENABLE_CRYPTODISK=.*/GRUB_ENABLE_CRYPTODISK=""/g' /tmp/grub \
         > /etc/default/grub
 }
 
@@ -450,8 +513,8 @@ config_fstab () {
         SWAPDEV="UUID=$(blkid -s UUID -o value ${SWAPPART})"
     fi
 
-    ( echo "UUID=$(blkid -s UUID -o value ${PARTUEFI})                            /boot/efi vfat  defaults,noatime 0 2" ; \
-      echo "UUID=$(blkid -s UUID -o value ${PARTBOOT}) /boot     ext4  defaults,noatime 0 2" ; \
+    ( if_uefipart echo "UUID=$(blkid -s UUID -o value ${UEFIPART})                            /boot/efi vfat  defaults,noatime 0 2" ; \
+      if_bootpart echo "UUID=$(blkid -s UUID -o value ${BOOTPART}) /boot     ext4  defaults,noatime 0 2" ; \
       echo "$ROOTDEV /         btrfs     subvol=@,defaults,noatime,compress,space_cache,autodefrag 0 1" ; \
       echo "$ROOTDEV /home     btrfs subvol=@home,defaults,noatime,compress,space_cache,autodefrag 0 2" ; \
       echo "$SWAPDEV none      swap  sw 0 0" ; \
@@ -755,14 +818,17 @@ config_crypttab () {
         if [ -f /etc/crypttab ] ; then
             cp /etc/crypttab /etc/crypttab-
         fi
-        ( echo "crypt_root             UUID=$(blkid -s UUID -o value ${PARTROOT}) ${UNLOCKFILE} luks,discard,initramfs${UNLOCKOPTS}" ; \
-          echo "crypt_swap             UUID=$(blkid -s UUID -o value ${PARTSWAP}) /crypto_keyfile.bin luks"
+        ( echo "crypt_root             UUID=$(blkid -s UUID -o value ${ROOTPDEV}) ${UNLOCKFILE} luks,discard,initramfs${UNLOCKOPTS}" ; \
+          echo "crypt_swap             UUID=$(blkid -s UUID -o value ${SWAPPDEV}) /crypto_keyfile.bin luks"
         ) > /etc/crypttab
     fi
 }
 
 config_encryption () {
     if [ "${ENCRYPT}" == yes ] ; then
+        
+        skip_if_bootpart config_grubenc
+        
         if [ "$TANGSERV" != "" ] # || [ "$TPMVERSION" == "1" ]
         then
             config_grubip
@@ -800,6 +866,8 @@ config_encryption () {
         else
             remove_clevis_tpm2
         fi
+    else
+        skip_if_bootpart remove_grubenc
     fi
 }
 
@@ -841,9 +909,17 @@ do_chroot () {
     update-initramfs -c -k all
 }
 
+DEPLOYDIR=${ROOTDIR}/home/${USERNAME}/deploy
+
 config_chroot () {
     export EFI_=$(efibootmgr -q > /dev/null 2>&1 && echo 1 || echo 0)
-    cp deploy.sh common.sh ${ROOTDIR}/tmp/
+    if [ "`realpath $0`" != "${DEPLOYDIR}/deploy.sh" ] ; then
+        mkdir -p ${DEPLOYDIR}
+        cp deploy.sh common.sh ${DEPLOYDIR}/
+    fi
+}
+
+run_chroot () {
     chroot ${ROOTDIR} $*
 }
 
@@ -851,6 +927,8 @@ show_settings () {
     echo TPMVERSION=${TPMVERSION}
     echo ENCRYPT=${ENCRYPT}
     echo DISK=${DISK}
+    if [ "${BOOTSIZE}" = "" ] && [ "$ENCRYPT" = yes ] ; then
+    fi
 }
 
 wipeout () {
@@ -874,7 +952,8 @@ wipeout () {
     setup_hostname
     setup_nic
     bind_dirs
-    config_chroot /tmp/deploy.sh do_chroot
+    config_chroot
+    run_chroot /home/${USERNAME}/deploy/deploy.sh do_chroot
     unbind_dirs
     unmount_partitions
     close_partitions
@@ -890,9 +969,15 @@ rescue () {
     mount_partitions
     bind_dirs
     config_chroot
+    run_chroot
     unbind_dirs
     unmount_partitions
     close_partitions
+}
+
+rescue_live () {
+    setup_aptinstall
+    rescue
 }
 
 if [ $# = 0 ] ; then
