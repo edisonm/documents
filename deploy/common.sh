@@ -24,6 +24,7 @@ bind_dirs () {
     mount --bind /dev  ${ROOTDIR}/dev
     mount --bind /proc ${ROOTDIR}/proc
     mount --bind /sys  ${ROOTDIR}/sys
+    mount --bind /sys/firmware/efi/efivars ${ROOTDIR}/sys/firmware/efi/efivars
     mount --bind /run  ${ROOTDIR}/run
     mount --bind /tmp  ${ROOTDIR}/tmp
 }
@@ -31,6 +32,7 @@ bind_dirs () {
 unbind_dirs () {
     umount ${ROOTDIR}/dev
     umount ${ROOTDIR}/proc
+    umount ${ROOTDIR}/sys/firmware/efi/efivars
     umount ${ROOTDIR}/sys
     umount ${ROOTDIR}/run
     umount ${ROOTDIR}/tmp

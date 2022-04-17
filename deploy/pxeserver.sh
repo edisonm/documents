@@ -333,6 +333,8 @@ do_chroot_pxe () {
     update-initramfs -c -k all
 }
 
+# TBD: may be this is better in ${ROOTDIR}/etc/kernel/postinst.d/ ???
+# For details, check: https://gist.github.com/carlwgeorge/d789d4fbb1db67deb412
 config_vmlinuz () {
     mkdir -p ${ROOTDIR}/etc/initramfs-tools/hooks
     cat <<'EOF' > ${ROOTDIR}/etc/initramfs-tools/hooks/vmlinuz
