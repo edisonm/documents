@@ -130,7 +130,6 @@ config_initpacks () {
     elif [ "${DISTRO}" == ubuntu ] ; then
         dpkg-reconfigure locales tzdata keyboard-configuration console-setup
     fi
-    apt-get install --yes mdadm
 }
 
 unpack_distro () {

@@ -410,7 +410,11 @@ do_bootparts () {
 }
 
 create_raid10_partitions () {
-    mdadm --stop --scan
+
+    if_bootpart \
+        if_bootext4 \
+        mdadm --stop --scan
+    
     sgdisk -o $DISK1
     sgdisk -o $DISK2
     sgdisk -o $DISK3
@@ -1065,6 +1069,9 @@ do_chroot () {
     config_admin
     config_aptcacher
     config_initpacks
+    if_bootpart \
+        if_bootext4 \
+        apt-get install --yes mdadm
     config_fstab
     config_grub
     inspkg_encryption
