@@ -492,7 +492,7 @@ setup_aptinstall () {
     apt-get install --yes debootstrap curl net-tools efibootmgr
 }
 
-setup_nic () {
+config_nic () {
     for nic in `ls /sys/class/net` ; do
         ( echo "auto $nic"
           if [ "$nic" != "lo" ] ; then
@@ -500,18 +500,18 @@ setup_nic () {
           else
               echo "iface $nic inet loopback"
           fi
-        ) > ${ROOTDIR}/etc/network/interfaces.d/$nic
+        ) > /etc/network/interfaces.d/$nic
     done
 }
 
-setup_hostname () {
-    echo $DESTNAME > ${ROOTDIR}/etc/hostname
+config_hostname () {
+    echo $DESTNAME > /etc/hostname
     ( echo "127.0.0.1	localhost" ; \
       echo "::1		localhost ip6-localhost ip6-loopback" ; \
       echo "ff02::1		ip6-allnodes" ; \
       echo "ff02::2		ip6-allrouters" ; \
       echo "127.0.1.1	$DESTNAME" ; \
-      ) > ${ROOTDIR}/etc/hosts
+      ) > /etc/hosts
 }
 
 mount_partitions () {
@@ -969,6 +969,21 @@ config_encryption () {
     fi
 }
 
+warn_tpm_failure () {
+    echo "WARNING: tpm failure, continuing without TPM, try './deploy.sh fix_tpm' after installation" 1>&2
+}
+
+recheck_tpm1 () {
+    /usr/sbin/tcsd
+    /usr/sbin/tpm_takeownership -y -z > /dev/null \
+        && echo 1 || warn_tpm_failure
+}
+
+recheck_tpm2 () {
+    echo | clevis encrypt tpm2 '{"key":"rsa","pcr_ids":"7"}' > /dev/null \
+        && echo 1 || warn_tpm_failure
+}
+
 inspkg_encryption () {
     if [ "${ENCRYPT}" == yes ] ; then
         ENCPACKS=cryptsetup
@@ -981,12 +996,12 @@ inspkg_encryption () {
         if [ "$TPMVERSION" == "1" ] ; then
             ENCPACKS+=" tpm-tools"
         fi
-        apt-get install --yes ${ENCPACKS}
+        apt-get install --yes ${ENCPACKS} || true
         if [ "$TPMVERSION" == "1" ] ; then
-            /usr/sbin/tcsd
-            /usr/sbin/tpm_takeownership -y -z \
-                || ( echo "WARNING: tpm failure, continuing without TPM, check BIOS settings" ; \
-                     TPMVERSION="" )
+            TPMVERSION=`recheck_tpm1`
+        fi
+        if [ "$TPMVERSION" == "2" ] ; then
+            TPMVERSION=`recheck_tpm2`
         fi
     fi
 }
@@ -1014,20 +1029,29 @@ show_settings () {
 }
 
 do_chroot () {
+    config_hostname
+    config_nic
+    config_admin
     config_aptcacher
     config_initpacks
     config_fstab
     config_grub
     inspkg_encryption
     config_encryption
-    config_noresume
     config_crypttab
+    config_noresume
     config_suspend
     update-grub
     config_init
-    config_admin
     apt update
     apt --yes full-upgrade
+    update-initramfs -c -k all
+}
+
+fix_tpm () {
+    inspkg_encryption
+    config_encryption
+    config_crypttab
     update-initramfs -c -k all
 }
 
@@ -1049,8 +1073,6 @@ wipeout () {
     mount_partitions
     exec_once unpack_distro
     setup_apt
-    setup_hostname
-    setup_nic
     bind_dirs
     config_chroot
     run_chroot /home/${USERNAME}/deploy/deploy.sh do_chroot
