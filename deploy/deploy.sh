@@ -736,7 +736,7 @@ copy_exec /usr/lib/x86_64-linux-gnu/libtss2-tcti-mssim.so.0.0.0
 #     copy_exec $file
 # done
 
-clevis encrypt tpm2 '{"key":"rsa","pcr_ids":"7"}' < /crypto_keyfile.bin > ${DESTDIR}/autounlock.key
+clevis encrypt tpm2 '{"key":"rsa","pcr_bank":"sha256","pcr_ids":"7"}' < /crypto_keyfile.bin > ${DESTDIR}/autounlock.key
 
 EOF
     chmod a+x /etc/initramfs-tools/hooks/clevis_tpm2
@@ -970,7 +970,7 @@ config_encryption () {
 }
 
 warn_tpm_failure () {
-    echo "WARNING: tpm failure, continuing without TPM, try './deploy.sh fix_tpm' after installation" 1>&2
+    echo "WARNING: tpm failure, continuing without TPM, try './deploy.sh fix_tpm' after reboot" 1>&2
 }
 
 recheck_tpm1 () {
@@ -980,8 +980,8 @@ recheck_tpm1 () {
 }
 
 recheck_tpm2 () {
-    echo | clevis encrypt tpm2 '{"key":"rsa","pcr_ids":"7"}' > /dev/null \
-        && echo 1 || warn_tpm_failure
+    echo | clevis encrypt tpm2 '{"key":"rsa","pcr_bank":"sha256","pcr_ids":"7"}' > /dev/null \
+        && echo 2 || warn_tpm_failure
 }
 
 inspkg_encryption () {
