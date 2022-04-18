@@ -90,6 +90,10 @@ UEFISIZE=+1G
 # Boot partition size, empty for no separated boot partition
 BOOTSIZE=+2G
 
+# boot partition file system to be used
+BOOTFS=ext4
+# BOOTFS=btrfs
+
 # Root partition size, 0 for max available space
 ROOTSIZE=0
 # ROOTSIZE=+32G
@@ -193,7 +197,8 @@ if_uefipart () {
 
 do_make_partitions () {
     # Boot patition:
-    if_bootpart sgdisk -n${BOOTSUFF}:0:${BOOTSIZE} -t${BOOTSUFF}:8300 $1
+    if_bootpart \
+        sgdisk -n${BOOTSUFF}:0:${BOOTSIZE} -t${BOOTSUFF}:8300 $1
     # SWAP partition (at the end):
     sgdisk     -n${SWAPSUFF}:${SWAPSIZE}:0 -t${SWAPSUFF}:8300 $1
     # Root partition:
@@ -249,20 +254,34 @@ setenv_dualboot4 () {
     setenv_singdual
 }
 
+if_bootext4 () {
+    if [ "${BOOTFS}" = ext4 ] ; then
+        $*
+    fi
+}
+
+if_bootbtrfs () {
+    if [ "${BOOTFS}" = btrfs ] ; then
+        $*
+    fi
+}
+
+setenv_bootext4 () {
+    BOOTDISK=/dev/md0
+    SUFFMD=1
+    BOOTPART=${BOOTDISK}`psep ${BOOTDISK}`${SUFFMD}
+}
+
+setenv_bootbtrfs () {
+    BOOTPART=${BOOTPART1}
+}
+
 setenv_raid10 () {
     BIOSSUFF=1
     UEFISUFF=2
     BOOTSUFF=3
     ROOTSUFF=4
     SWAPSUFF=5
-
-    BOOTDISK=/dev/md0
-
-    SUFFMD=1
-
-    BOOTPART=${BOOTDISK}`psep ${BOOTDISK}`${SUFFMD}
-    # ROOTPDEV=${DISKROOT}`psep ${DISKROOT}`${SUFFMD}
-    # SWAPPDEV=${DISKSWAP}`psep ${DISKSWAP}`${SUFFMD}
 
     # Pick one, later you can sync the other copies
     UEFIPART=${DISK1}${PSEP}${UEFISUFF}
@@ -276,6 +295,9 @@ setenv_raid10 () {
     BOOTPART2=${DISK2}${PSEP2}${BOOTSUFF}
     BOOTPART3=${DISK3}${PSEP3}${BOOTSUFF}
     BOOTPART4=${DISK4}${PSEP4}${BOOTSUFF}
+
+    if_bootext4  setenv_bootext4
+    if_bootbtrfs setenv_bootbtrfs
     
     ROOTPDEV1=${DISK1}${PSEP1}${ROOTSUFF}
     ROOTPDEV2=${DISK2}${PSEP2}${ROOTSUFF}
@@ -358,10 +380,16 @@ dualboot4_partitions () {
     make_partitions ${DISK}
 }
 
-reopen_raid10_partitions () {
+do_reopen_raid10_partitions () {
     mdadm --stop --scan
     sleep 1
-    if_bootpart mdadm --assemble ${BOOTDISK} $BOOTPARTS
+    mdadm --assemble ${BOOTDISK} $BOOTPARTS
+}
+
+reopen_raid10_partitions () {
+    if_bootpart \
+        if_bootext4 \
+        do_reopen_raid10_partitions
 }
 
 raid10_partitions () {
@@ -370,10 +398,15 @@ raid10_partitions () {
         create_raid10_partitions
 }
 
-do_zerosb_bootparts () {
+do_bootparts () {
+    mdadm --stop --scan
     for part in $* ; do
         mdadm --zero-superblock $part || true
     done
+    partprobe
+    sleep 1
+    mdadm --create ${BOOTDISK} --level raid1 --metadata=1.0 --raid-devices 4 --force $*
+    sgdisk -n1:0:0 -t1:8300 ${BOOTDISK}
 }
 
 create_raid10_partitions () {
@@ -395,14 +428,9 @@ create_raid10_partitions () {
     do_make_partitions $DISK3
     do_make_partitions $DISK4
 
-    mdadm --stop --scan
-
-    if_bootpart do_zerosb_bootparts $BOOTPARTS
-    partprobe
-    sleep 1
-    if_bootpart mdadm --create ${BOOTDISK} --level raid1 --metadata=1.0 --raid-devices 4 --force $BOOTPARTS
-    
-    sgdisk -n1:0:0 -t1:8300 $BOOTDISK
+    if_bootpart \
+        if_bootext4 \
+        do_bootparts $BOOTPARTS
 }
 
 open_rootpart () {
@@ -453,13 +481,16 @@ build_partitions () {
         FORCBTRFS="-f"
     fi
 
-    if_bootpart mkfs.ext4  ${FORCEEXT4} -L boot ${BOOTPART}
+    if_bootext4 if_bootpart mkfs.ext4  ${FORCEEXT4} -L boot ${BOOTPART}
 
     if [ "$DISKLAYOUT" = raid10 ] ; then
-        mkfs.btrfs ${FORCBTRFS} -L root -m raid10 -d raid10 ${ROOTPARTS}
-    else
-        mkfs.btrfs ${FORCBTRFS} -L root ${ROOTPARTS}
+        MKFSBTRFS="-m raid10 -d raid10"
     fi
+    
+    if_bootbtrfs \
+        if_bootpart \
+        mkfs.btrfs ${FORCBTRFS} -L boot ${MKFSBTRFS} ${BOOTPARTS}
+    mkfs.btrfs ${FORCBTRFS} -L root ${MKFSBTRFS} ${ROOTPARTS}
 
     for SWAPPART in ${SWAPPARTS} ; do
         mkswap ${SWAPPART}
@@ -580,7 +611,7 @@ config_grub () {
 dump_fstab () {
 
     if_uefipart echo "UUID=$(blkid -s UUID -o value ${UEFIPART}) /boot/efi vfat  defaults,noatime 0 2"
-    if_bootpart echo "UUID=$(blkid -s UUID -o value ${BOOTPART}) /boot     ext4  defaults,noatime 0 2"
+    if_bootpart echo "UUID=$(blkid -s UUID -o value ${BOOTPART}) /boot     ${BOOTFS}  defaults,noatime 0 2"
     
     if [ "${ENCRYPT}" == yes ] ; then
         ROOTDEV="${ROOTPART}                  "
