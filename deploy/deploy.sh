@@ -27,7 +27,7 @@
 # Machine specific configuration:
 USERNAME=admin
 FULLNAME="Administrative Account"
-DESTNAME=debian4
+DESTNAME=testbackup2
 DISTRO=debian
 VERSNAME=bullseye
 # APT Cache Server, leave it empty to disable:
@@ -91,8 +91,8 @@ UEFISIZE=+1G
 BOOTSIZE=+2G
 
 # boot partition file system to be used
-BOOTFS=ext4
-# BOOTFS=btrfs
+# BOOTFS=ext4
+BOOTFS=btrfs
 
 # Root partition size, 0 for max available space
 ROOTSIZE=0
@@ -632,7 +632,7 @@ dump_fstab () {
         else
             SWAPDEV="UUID=$(blkid -s UUID -o value ${SWAPPART})"
         fi
-        echo "$SWAPDEV none      swap  sw 0 0"
+        echo "$SWAPDEV none      swap  sw,pri=1 0 0"
     done
 }
 
