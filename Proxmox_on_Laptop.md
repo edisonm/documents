@@ -3,10 +3,10 @@
 While some tutorials out there are more focused on reusing old laptops as
 servers, this is more for people like me who want to use Proxmox as a Desktop
 Virtualization in a Mobile Workstation, in my case, I use it to test
-it-infrastructure that later can be deployed in real machines.
+it-infrastructure that later can be deployed in production machines.
 
 Follow the [official installation
-instructions](https://pve.proxmox.com/wiki/Install_Proxmox_VE_on_Debian_Buster),
+instructions](https://pve.proxmox.com/wiki/Install_Proxmox_VE_on_Debian_12_Bookworm),
 except those steps related to networking, since the network requires a different
 configuration to let it work with a dynamic network environment, which is
 typical in a laptop: dynamic IPs, different WIFIs, etc.
@@ -22,8 +22,7 @@ hostnames of the LAN.  To let our settings consider those situations we will
 setup a dhcp+dns server as an LXC container, and in the laptop, we will replace
 systemd-resolved by unbound.  Both the DNS service for the virtual machines and
 unbound should not be installed on the laptop directly, since they share the
-same port (53), in any case is better to keep them separated and not to force to
-be all together. See
+same port (53), instead is better to keep them separated and not together. See
 [this](https://www.sidn.nl/en/news-and-blogs/evaluation-of-validating-resolvers-on-linux-unbound-and-knot-resolver-recommended)
 for more reasons to replace dnsmasq and systemd-resolved.
 
@@ -278,3 +277,21 @@ _mydomain.local_ the local domain and _mylaptop_ the laptop hostname:
     nvidia-settings
     nvidia-smi
     lsmod|grep nvidia
+
+  - Final tweaks: If you want to hide the vm drives in zfs from the host in
+    applications that depends on udev like Nautilius or Nemo, open the script
+    `pve_ignore_vm.sh`, edit the variable pxve_zfs to point at the zfs used by
+    proxmox and run it as root:
+
+    ```
+    ./pve_ignore_vm.sh
+    ```
+    
+    This will create a file called /etc/udev/rules.d/99-hide-partitions.rules
+
+    Finally, create a file called /etc/udev/rules.d/98-hide-bitlocker.rules
+    which will hide the bitlocker units, since they are useless in the host:
+
+    ```
+    SUBSYSTEM=="block", ENV{ID_FS_TYPE}=="BitLocker", ENV{UDISKS_IGNORE}="1"
+    ```
