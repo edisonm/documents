@@ -280,8 +280,8 @@ _mydomain.local_ the local domain and _mylaptop_ the laptop hostname:
 
   - Final tweaks: If you want to hide the vm drives in zfs from the host in
     applications that depends on udev like Nautilius or Nemo, open the script
-    `pve_ignore_vm.sh`, edit the variable pxve_zfs to point at the zfs used by
-    proxmox and run it as root:
+    [pve_ignore_vm.sh](pve_ignore_vm.sh), edit the variable pxve_zfs to point at
+    the zfs used by proxmox and run it as root:
 
     ```
     ./pve_ignore_vm.sh
