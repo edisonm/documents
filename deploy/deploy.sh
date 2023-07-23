@@ -762,6 +762,7 @@ copy_exec /usr/bin/tpm2_load
 copy_exec /usr/bin/tpm2_unseal
 copy_exec /usr/bin/tpm2_createpolicy
 copy_exec /usr/bin/tpm2_create
+copy_exec /usr/bin/tpm2_flushcontext
 copy_exec /usr/lib/x86_64-linux-gnu/libtss2-tcti-device.so.0
 copy_exec /usr/lib/x86_64-linux-gnu/libtss2-tcti-device.so.0.0.0
 copy_exec /usr/lib/x86_64-linux-gnu/libtss2-tcti-mssim.so.0
