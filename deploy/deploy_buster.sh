@@ -35,7 +35,7 @@ WITHTPM2=1
 DEBPACKS="acl binutils build-essential emacs firefox-esr openssh-server"
 #DEBPACKS+=" xfce4 task-xfce-desktop"
 DEBPACKS+=" lxde  task-lxde-desktop"
-# DEBPACKS+="acpid alsa-utils anacron binutils fcitx libreoffice"
+# DEBPACKS+=" acpid alsa-utils anacron binutils fcitx libreoffice"
 # APT Cache Server, leave it empty to disable:
 APTCACHER=10.8.0.1
 # Unit where you will install Debian

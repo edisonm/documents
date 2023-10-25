@@ -48,7 +48,7 @@ DEBPACKS="acl binutils build-essential openssh-server"
 # DEBPACKS+=" xfce4 task-xfce-desktop"
 # DEBPACKS+=" lxde task-lxde-desktop"
 # DEBPACKS+=" cinnamon task-cinnamon-desktop"
-# DEBPACKS+="acpid alsa-utils anacron fcitx libreoffice"
+# DEBPACKS+=" acpid alsa-utils anacron fcitx libreoffice"
 
 # Disk layout:
 

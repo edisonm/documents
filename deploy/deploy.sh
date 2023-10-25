@@ -8,11 +8,12 @@
 
 # Script to automate deployment of Debian/Ubuntu in several scenarios
 
-# Assumptions: this will be used in a machine of minimum 32GB of storage, 8GB
-# RAM, it support UEFI or BIOS, the root fs will be a btrfs encrypted via LUKS,
-# password-less unlock via a key-file which is encrypted via clevis+(tang or
-# tpm2) or tpm1, and password input via keyboard as failover.  We can not use
-# dracut since is too much hastle, and proxmox is not compatible with it yet.
+# Assumptions: this will be used in a machine of minimum 32GB of storage
+# (recommented 64GB), 8GB RAM, it support UEFI or BIOS, the root fs will be a
+# btrfs encrypted via LUKS, password-less unlock via a key-file which is
+# encrypted via clevis+(tang or tpm2) or tpm1, and password input via keyboard
+# as failover.  We can not use dracut since is too much hastle, and proxmox is
+# not compatible with it yet.
 
 # Implementation guidelines:
 
@@ -24,12 +25,17 @@
 # fixes.  Don't update it without considering that the filesystem layout would
 # have changed in newer versions of these scripts.
 
+# BUG: bookworm is not working yet.  To install it, use bullseye and upgrade
+# the system afterwards.
+
 # Machine specific configuration:
 USERNAME=admin
 FULLNAME="Administrative Account"
 DESTNAME=testbackup2
 DISTRO=debian
 VERSNAME=bullseye
+
+# VERSNAME=bookworm
 # APT Cache Server, leave it empty to disable:
 APTCACHER=10.8.0.1
 
@@ -48,7 +54,7 @@ DEBPACKS="acl binutils build-essential openssh-server"
 # DEBPACKS+=" xfce4 task-xfce-desktop"
 # DEBPACKS+=" lxde task-lxde-desktop"
 # DEBPACKS+=" cinnamon task-cinnamon-desktop"
-# DEBPACKS+="acpid alsa-utils anacron fcitx libreoffice"
+# DEBPACKS+=" acpid alsa-utils anacron fcitx libreoffice"
 
 # Disk layout:
 
@@ -58,9 +64,9 @@ DEBPACKS="acl binutils build-essential openssh-server"
 # Start at 4
 # DISKLAYOUT=dualboot4
 
-DISKLAYOUT=singboot
+#DISKLAYOUT=singboot
+DISKLAYOUT=wipeout
 
-# DISKLAYOUT=wipeout
 # DISKLAYOUT=raid10
 
 # Unit where you will install Debian, valid for those uni-disk layouts:
@@ -91,15 +97,16 @@ UEFISIZE=+1G
 BOOTSIZE=+2G
 
 # boot partition file system to be used
-# BOOTFS=ext4
-BOOTFS=btrfs
+BOOTFS=ext4
+# BOOTFS=btrfs
 
 # Root partition size, 0 for max available space
 ROOTSIZE=0
-# ROOTSIZE=+32G
+# ROOTSIZE=+64G
 
 # Swap partition size, placed at the end
-SWAPSIZE=-4G
+SWAPSIZE=-8G
+# SWAPSIZE=-16G
 
 # Enable if you are attempting to continue an incomplete installation
 # RESUMING=yes
@@ -1022,7 +1029,7 @@ recheck_tpm2 () {
 
 inspkg_encryption () {
     if [ "${ENCRYPT}" == yes ] ; then
-        ENCPACKS=cryptsetup
+        ENCPACKS="cryptsetup"
         if [ "$TANGSERV" != "" ] || [ "$TPMVERSION" == "2" ] ; then
             ENCPACKS+=" clevis"
             if [ "$TPMVERSION" == "2" ] ; then
@@ -1037,6 +1044,8 @@ inspkg_encryption () {
             TPMVERSION=`recheck_tpm1`
         fi
         if [ "$TPMVERSION" == "2" ] ; then
+            # tpm2_clear will remove all TPM keys, but it will make it work --EMM
+            tpm2_clear
             TPMVERSION=`recheck_tpm2`
         fi
     fi
@@ -1070,9 +1079,9 @@ do_chroot () {
     config_admin
     config_aptcacher
     config_initpacks
-    if_bootpart \
-        if_bootext4 \
-        apt-get install --yes mdadm
+    # if_bootpart \
+    #     if_bootext4 \
+    #     apt-get install --yes mdadm
     config_fstab
     config_grub
     inspkg_encryption

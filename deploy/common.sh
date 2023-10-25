@@ -24,7 +24,9 @@ bind_dirs () {
     mount --bind /dev  ${ROOTDIR}/dev
     mount --bind /proc ${ROOTDIR}/proc
     mount --bind /sys  ${ROOTDIR}/sys
-    mount --bind /sys/firmware/efi/efivars ${ROOTDIR}/sys/firmware/efi/efivars
+    if [ -d /sys/firmware/efi/efivars ] ; then
+        mount --bind /sys/firmware/efi/efivars ${ROOTDIR}/sys/firmware/efi/efivars
+    fi
     mount --bind /run  ${ROOTDIR}/run
     mount --bind /tmp  ${ROOTDIR}/tmp
 }
@@ -32,7 +34,9 @@ bind_dirs () {
 unbind_dirs () {
     umount ${ROOTDIR}/dev
     umount ${ROOTDIR}/proc
-    umount ${ROOTDIR}/sys/firmware/efi/efivars
+    if [ -d /sys/firmware/efi/efivars ] ; then
+        umount ${ROOTDIR}/sys/firmware/efi/efivars
+    fi
     umount ${ROOTDIR}/sys
     umount ${ROOTDIR}/run
     umount ${ROOTDIR}/tmp
@@ -50,23 +54,31 @@ setup_apt () {
     setup_apt_${DISTRO}
 }
 
+if [ "${VERSNAME}" == bookworm ] ; then
+    NONFREE=non-free-firmware
+else
+    NONFREE=non-free
+fi
+
 setup_apt_debian () {
     cat <<'EOF' | sed -e s:'<VERSNAME>':"${VERSNAME}":g \
+                      -e s:'<NONFREE>':"${NONFREE}":g \
                       > ${ROOTDIR}/etc/apt/sources.list
-deb http://deb.debian.org/debian <VERSNAME> main contrib
-deb-src http://deb.debian.org/debian <VERSNAME> main contrib
+deb http://deb.debian.org/debian <VERSNAME> main contrib <NONFREE>
+deb-src http://deb.debian.org/debian <VERSNAME> main contrib <NONFREE>
 
-deb http://security.debian.org/debian-security <VERSNAME>-security main contrib
-deb-src http://security.debian.org/debian-security <VERSNAME>-security main contrib
+deb http://security.debian.org/debian-security <VERSNAME>-security main contrib <NONFREE>
+deb-src http://security.debian.org/debian-security <VERSNAME>-security main contrib <NONFREE>
 
-deb http://deb.debian.org/debian <VERSNAME>-updates main contrib
-deb-src http://deb.debian.org/debian <VERSNAME>-updates main contrib
+deb http://deb.debian.org/debian <VERSNAME>-updates main contrib <NONFREE>
+deb-src http://deb.debian.org/debian <VERSNAME>-updates main contrib <NONFREE>
 EOF
 
     cat <<'EOF' | sed -e s:'<VERSNAME>':"${VERSNAME}":g \
+                      -e s:'<NONFREE>':"${NONFREE}":g \
                       > ${ROOTDIR}/etc/apt/sources.list.d/${VERSNAME}-backport.list
-deb http://deb.debian.org/debian <VERSNAME>-backports main contrib
-deb-src http://deb.debian.org/debian <VERSNAME>-backports main contrib
+deb http://deb.debian.org/debian <VERSNAME>-backports main contrib <NONFREE>
+deb-src http://deb.debian.org/debian <VERSNAME>-backports main contrib <NONFREE>
 EOF
 }
 
@@ -124,12 +136,13 @@ config_initpacks () {
       echo "keyboard-configuration keyboard-configuration/layoutcode string us" ; \
       echo "keyboard-configuration keyboard-configuration/variant    select English (US)" ; \
       ) | debconf-set-selections -v
-    apt-get install --yes locales console-setup
+    apt-get install --yes locales console-setup initramfs-tools
     if [ "${DISTRO}" == debian ] ; then
         dpkg-reconfigure locales tzdata keyboard-configuration console-setup -f noninteractive
     elif [ "${DISTRO}" == ubuntu ] ; then
         dpkg-reconfigure locales tzdata keyboard-configuration console-setup
     fi
+    
 }
 
 unpack_distro () {
