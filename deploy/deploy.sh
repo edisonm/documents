@@ -97,8 +97,8 @@ UEFISIZE=+1G
 BOOTSIZE=+2G
 
 # boot partition file system to be used
-BOOTFS=ext4
-# BOOTFS=btrfs
+# BOOTFS=ext4
+BOOTFS=btrfs
 
 # Root partition size, 0 for max available space
 ROOTSIZE=0
