@@ -32,7 +32,7 @@
 # Machine specific configuration:
 USERNAME=admin
 FULLNAME="Administrative Account"
-DESTNAME=debian1
+DESTNAME=debian3
 
 # Distributon.  Note that proxmox is based on debian.
 # DISTRO=debian
@@ -469,6 +469,12 @@ collect_swappart () {
     SWAPPARTS+=" /dev/mapper/crypt_swap${IDX}"
 }
 
+if_encrypt () {
+    if [ "${ENCRYPT}" == yes ] ; then
+        $*
+    fi
+}
+
 if [ "${ENCRYPT}" == yes ] ; then
     ROOTPARTS=
     forall_rootpdevs collect_rootpart
@@ -695,14 +701,17 @@ build_partitions () {
     for SWAPPART in ${SWAPPARTS} ; do
         mkswap ${SWAPPART}
     done
+}
 
-    if [ "${ENCRYPT}" == yes ] ; then
-        dd if=/dev/urandom bs=512 count=1 of=${ROOTDIR}/crypto_keyfile.bin
-        chmod go-rw ${ROOTDIR}/crypto_keyfile.bin
-        for PDEV in ${ROOTPDEVS} ${SWAPPDEVS} ; do
-            printf "%s" "$KEY_"|cryptsetup luksAddKey ${PDEV} ${ROOTDIR}/crypto_keyfile.bin --key-file -
-        done
-    fi
+create_keyfile () {
+    dd if=/dev/urandom bs=512 count=1 of=${ROOTDIR}/crypto_keyfile.bin
+    chmod go-rw ${ROOTDIR}/crypto_keyfile.bin
+}
+
+encrypt_partitions () {
+    for PDEV in ${ROOTPDEVS} ${SWAPPDEVS} ; do
+        printf "%s" "$KEY_"|cryptsetup luksAddKey ${PDEV} ${ROOTDIR}/crypto_keyfile.bin --key-file -
+    done
 }
 
 setup_aptinstall () {
@@ -1362,7 +1371,7 @@ update_boot () {
     fi
 }
 
-do_chroot () {
+chroot_install () {
     config_hostname
     config_nic
     config_admin
@@ -1386,6 +1395,19 @@ do_chroot () {
     update-initramfs -c -k all
 }
 
+chroot_restore () {
+    config_fstab
+    config_boot
+    inspkg_encryption
+    config_encryption
+    config_crypttab
+    update_boot
+    config_init
+    apt update
+    apt --yes full-upgrade
+    update-initramfs -c -k all
+}
+
 fix_tpm () {
     inspkg_encryption
     config_encryption
@@ -1394,18 +1416,15 @@ fix_tpm () {
 }
 
 check_prereq () {
-    if [ "${ROOTFS}" == zfs ] || [ "${BOOTFS}" == zfs ] ; then
-        apt install --yes mokutil
-        if [ "`mokutil --sb-state`" == "SecureBoot enabled" ] ; then
-            echo "ERROR: Installing a zfs file system with SecureBoot enabled is not supported"
-            exit 1
-        fi
+    apt install --yes mokutil
+    if [ "`mokutil --sb-state`" == "SecureBoot enabled" ] ; then
+        echo "ERROR: Installing a zfs file system with SecureBoot enabled is not supported"
+        exit 1
     fi
 }
 
-install () {
-    ROOTDIR=/mnt
-    check_prereq
+prepare_partitions () {
+    if_zfs check_prereq
     show_settings
     warn_confirm
     if_else_resuming \
@@ -1420,16 +1439,30 @@ install () {
     if_else_resuming \
         mount_partitions \
         build_partitions
-    exec_once unpack_distro
+}
+
+if_zfs () {
+    if [ "${ROOTFS}" == zfs ] || [ "${BOOTFS}" == zfs ] ; then
+        $*
+    fi
+}
+
+cp_zpool_cache () {
+    if [ -f /etc/zfs/zpool.cache ] ; then
+        cp /etc/zfs/zpool.cache ${ROOTDIR}/etc/zfs/zpool.cache
+    fi
+}
+
+install () {
+    prepare_partitions
     setup_apt
+    exec_once unpack_distro
+    skip_if_resuming if_encrypt create_keyfile
+    skip_if_resuming if_encrypt encrypt_partitions
     bind_dirs
     config_chroot
-    run_chroot /home/${USERNAME}/deploy/deploy.sh do_chroot
-    if [ "${ROOTFS}" == zfs ] || [ "${BOOTFS}" == zfs ] ; then
-        if [ -f /etc/zfs/zpool.cache ] ; then
-            cp /etc/zfs/zpool.cache ${ROOTDIR}/etc/zfs/zpool.cache
-        fi
-    fi
+    run_chroot /home/${USERNAME}/deploy/deploy.sh chroot_install
+    if_zfs cp_zpool_cache
     unbind_dirs
     unmount_partitions
     close_partitions
@@ -1454,6 +1487,27 @@ rescue () {
 rescue_live () {
     setup_aptinstall
     rescue
+}
+
+restore () {
+    prepare_partitions
+    apt-get install --yes pv
+    # EXAMPLE of parameters to restore from a backup/clone a machine, adapt them as needed:
+    SNAPSHOT=__deploy_restsnap__
+    BACKUPSRV=debian3
+    BACKUPSRC=rpool/ROOT/${DESTNAME}@${SNAPSHOT}
+    ( ssh ${BACKUPSRV} zfs destroy  -R ${BACKUPSRC} || true )
+    ssh ${BACKUPSRV} zfs snapshot -r ${BACKUPSRC}
+    SIZE="`ssh ${BACKUPSRV} zfs send -nvPc -R ${BACKUPSRC} 2>/dev/null | grep size| awk '{print $2}'`"
+    ssh ${BACKUPSRV} zfs send -c -R ${BACKUPSRC} | pv -reps ${SIZE} | zfs recv -d -F rpool
+    skip_if_resuming if_encrypt encrypt_partitions
+    bind_dirs
+    config_chroot
+    run_chroot /home/${USERNAME}/deploy/deploy.sh chroot_restore
+    if_zfs cp_zpool_cache
+    unbind_dirs
+    unmount_partitions
+    close_partitions
 }
 
 if [ $# = 0 ] ; then
