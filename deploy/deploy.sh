@@ -22,20 +22,31 @@
 
 # WARNING: once the system is deployed, a copy of this script will remain in
 # /home/$USERNAME/deploy/ to perform maintenance tasks, reconfigurations or
-# fixes.  Don't update it without considering that the filesystem layout would
-# have changed in newer versions of these scripts.
+# fixes.  Don't update it without considering that the filesystem layout could
+# change in newer versions of these scripts.
 
-# BUG: bookworm is not working yet.  To install it, use bullseye and upgrade
-# the system afterwards.
+# Note: encrypted proxmox with no boot partition will means all the drive except
+# the efi partition will be encrypted.
 
 # Machine specific configuration:
 USERNAME=admin
 FULLNAME="Administrative Account"
-DESTNAME=testbackup2
-DISTRO=debian
-VERSNAME=bullseye
+DESTNAME=debian1
 
-# VERSNAME=bookworm
+# Distributon.  Note that proxmox is based on debian.
+# DISTRO=debian
+# DISTRO=ubuntu
+DISTRO=proxmox
+
+# VERSNAME=bullseye
+VERSNAME=bookworm
+
+# Specifies wether you want to install the full proxmox or only the kernel plus
+# the boot utils.  Note: you must choose PROXMOX=boot if you want to use zfs
+
+# PROXMOX=full
+PROXMOX=boot
+
 # APT Cache Server, leave it empty to disable:
 APTCACHER=10.8.0.1
 
@@ -57,6 +68,8 @@ DEBPACKS="acl binutils build-essential openssh-server"
 # DEBPACKS+=" acpid alsa-utils anacron fcitx libreoffice"
 
 # Disk layout:
+DISKLAYOUT=singboot
+# DISKLAYOUT=raid10
 
 # Start at 3, similar to singboot without redefined bios and uefi partitons
 # DISKLAYOUT=dualboot
@@ -64,10 +77,34 @@ DEBPACKS="acl binutils build-essential openssh-server"
 # Start at 4
 # DISKLAYOUT=dualboot4
 
-#DISKLAYOUT=singboot
-DISKLAYOUT=wipeout
+# Specifies if you want to wipe out existing partions, if no then trying to
+# overwrite partitions will cause a failure.
+WIPEOUT=yes
 
-# DISKLAYOUT=raid10
+# UEFI partition size. It is going to be created if the system supports UEFI,
+# otherwise will be ignored and a 1k bios_grub partition will be created.
+UEFISIZE=+1G
+
+# Boot partition size, empty for no separated boot partition.
+# BOOTSIZE=+2G
+
+# boot partition file system to be used
+# BOOTFS=ext4
+# BOOTFS=btrfs
+BOOTFS=zfs
+
+# Root partition size, 0 for max available space
+ROOTSIZE=0
+# ROOTSIZE=+64G
+
+# root partition file system to be used
+# BOOTFS=ext4
+# ROOTFS=btrfs
+ROOTFS=zfs
+
+# Swap partition size, placed at the end, empty for no swap
+SWAPSIZE=-8G
+# SWAPSIZE=-16G
 
 # Unit where you will install Debian, valid for those uni-disk layouts:
 # DISK=/dev/mmcblk0
@@ -86,27 +123,6 @@ DISK1=/dev/vda
 DISK2=/dev/vdb
 DISK3=/dev/vdc
 DISK4=/dev/vdd
-
-# UEFI partition size, empty for no uefi partition. Note that if is defined and
-# UEFI is not supported, the partition is still created although not used.  If
-# the system is UEFI and this is not defined, the system boot will be broken.
-
-UEFISIZE=+1G
-
-# Boot partition size, empty for no separated boot partition
-BOOTSIZE=+2G
-
-# boot partition file system to be used
-# BOOTFS=ext4
-BOOTFS=btrfs
-
-# Root partition size, 0 for max available space
-ROOTSIZE=0
-# ROOTSIZE=+64G
-
-# Swap partition size, placed at the end
-SWAPSIZE=-8G
-# SWAPSIZE=-16G
 
 # Enable if you are attempting to continue an incomplete installation
 # RESUMING=yes
@@ -170,14 +186,17 @@ make_biospar () {
 make_uefipar () {
     # UEFI booting:
     sgdisk -n${UEFISUFF}:1M:${UEFISIZE} -t${UEFISUFF}:EF00 $1
+    # NOTE: Required even for proxmox, don't oversmart this script ;)
     mkdosfs -F 32 -s 1 -n EFI ${1}`psep ${1}`${UEFISUFF}
 }
 
 do_make_biosuefipar () {
     # Partition your disk(s). This scheme works for both BIOS and UEFI, so that
     # we can switch without resizing partitions (which is a headache):
-    make_biospar $*
-    if_uefipart make_uefipar $*
+    skip_if_uefi \
+        make_biospar $*
+    if_uefi \
+        make_uefipar $*
 }
 
 make_partitions () {
@@ -190,15 +209,47 @@ if_bootpart () {
     fi
 }
 
+if_swappart () {
+    if [ "${SWAPSIZE}" != "" ] ; then
+        $*
+    fi
+}
+
 skip_if_bootpart () {
     if [ "${BOOTSIZE}" = "" ] ; then
         $*
     fi
 }
 
-if_uefipart () {
-    if [ "${UEFISIZE}" != "" ] ; then
+skip_if_proxmox () {
+    if [ "${DISTRO}" != "proxmox" ] ; then
         $*
+    fi
+}
+
+skip_if_bootfs_zfs () {
+    if [ "${BOOTFS}" != "zfs" ] ; then
+        $*
+    fi
+}
+
+if_uefi () {
+    if [ -d /sys/firmware/efi ] ; then
+        $*
+    fi
+}
+
+skip_if_uefi () {
+    if [ ! -d /sys/firmware/efi ] ; then
+        $*
+    fi
+}
+
+if_else_uefi () {
+    if [ -d /sys/firmware/efi ] ; then
+        $1
+    else
+        $2
     fi
 }
 
@@ -207,7 +258,8 @@ do_make_partitions () {
     if_bootpart \
         sgdisk -n${BOOTSUFF}:0:${BOOTSIZE} -t${BOOTSUFF}:8300 $1
     # SWAP partition (at the end):
-    sgdisk     -n${SWAPSUFF}:${SWAPSIZE}:0 -t${SWAPSUFF}:8300 $1
+    if_swappart \
+        sgdisk     -n${SWAPSUFF}:${SWAPSIZE}:0 -t${SWAPSUFF}:8300 $1
     # Root partition:
     sgdisk     -n${ROOTSUFF}:0:${ROOTSIZE} -t${ROOTSUFF}:8300 $1
 }
@@ -219,55 +271,117 @@ psep () {
     fi
 }
 
+setenv_singdual_swap () {
+    SWAPPDEV=${DISK}${PSEP}${SWAPSUFF}
+    SWAPPDEVS=${SWAPPDEV}
+}
+
 setenv_singdual () {
     PSEP=`psep ${DISK}`
     UEFIPART=${DISK}${PSEP}${UEFISUFF}
     BOOTPART=${DISK}${PSEP}${BOOTSUFF}
     ROOTPDEV=${DISK}${PSEP}${ROOTSUFF}
-    SWAPPDEV=${DISK}${PSEP}${SWAPSUFF}
 
     UEFIPARTS=${UEFIPART}
     BOOTPARTS=${BOOTPART}
     ROOTPDEVS=${ROOTPDEV}
-    SWAPPDEVS=${SWAPPDEV}
+
+    if_swappart \
+        setenv_singdual_swap
 }
 
+inc_count () {
+    COUNT=$((${COUNT}+1))
+}
+
+bios_suff () {
+    BIOSSUFF=${COUNT}
+}
+
+set_bios_suff () {
+    skip_if_uefi bios_suff
+    skip_if_uefi inc_count
+}
+
+uefi_suff () {
+    UEFISUFF=${COUNT}
+}
+
+set_uefi_suff () {
+    if_uefi uefi_suff
+    if_uefi inc_count
+}
+
+boot_suff () {
+    BOOTSUFF=${COUNT}
+}
+
+set_boot_suff () {
+    if_bootpart boot_suff
+    if_bootpart inc_count
+}
+
+root_suff () {
+    ROOTSUFF=${COUNT}
+}
+
+set_root_suff () {
+    root_suff
+    inc_count
+}
+
+swap_suff () {
+    SWAPSUFF=${COUNT}
+}
+
+set_swap_suff () {
+    if_swappart swap_suff
+    if_swappart inc_count
+}
 setenv_singboot () {
-    BIOSSUFF=1
-    UEFISUFF=2
-    BOOTSUFF=3
-    ROOTSUFF=4
-    SWAPSUFF=5
+    COUNT=1
+    set_bios_suff
+    set_uefi_suff
+    set_boot_suff
+    set_root_suff
+    set_swap_suff
     setenv_singdual
 }
 
-setenv_wipeout () {
-    setenv_singboot
-}
-
 setenv_dualboot () {
-    UEFISUFF=1
-    BOOTSUFF=4
-    ROOTSUFF=5
-    SWAPSUFF=6
+    COUNT=1
+    set_uefi_suff
+    inc_count
+    inc_count
+    set_boot_suff
+    set_root_suff
+    set_swap_suff
     setenv_singdual
 }
 
 setenv_dualboot4 () {
-    UEFISUFF=1
-    BOOTSUFF=3
-    ROOTSUFF=4
-    SWAPSUFF=5
+    COUNT=1
+    set_uefi_suff
+    inc_count
+    set_boot_suff
+    set_root_suff
+    set_swap_suff
     setenv_singdual
 }
 
-if_bootext4 () {
+if_raid10 () {
+    if [ "${DISKLAYOUT}" = raid10 ] ; then
+        $*
+    fi
+}
+
+if_boot_ext4 () {
     if [ "${BOOTFS}" = ext4 ] ; then
         $*
     fi
 }
 
-if_bootbtrfs () {
+if_boot_btrfs () {
     if [ "${BOOTFS}" = btrfs ] ; then
         $*
     fi
@@ -283,13 +397,22 @@ setenv_bootbtrfs () {
     BOOTPART=${BOOTPART1}
 }
 
-setenv_raid10 () {
-    BIOSSUFF=1
-    UEFISUFF=2
-    BOOTSUFF=3
-    ROOTSUFF=4
-    SWAPSUFF=5
+setenv_raid10_swap () {
+    SWAPPDEV1=${DISK1}${PSEP1}${SWAPSUFF}
+    SWAPPDEV2=${DISK2}${PSEP2}${SWAPSUFF}
+    SWAPPDEV3=${DISK3}${PSEP3}${SWAPSUFF}
+    SWAPPDEV4=${DISK4}${PSEP4}${SWAPSUFF}
+    SWAPPDEVS="${SWAPPDEV1} ${SWAPPDEV2} ${SWAPPDEV3} ${SWAPPDEV4}"
+}
 
+setenv_raid10 () {
+    COUNT=1
+    set_bios_suff
+    set_uefi_suff
+    set_boot_suff
+    set_root_suff
+    set_swap_suff
+    
     # Pick one, later you can sync the other copies
     UEFIPART=${DISK1}${PSEP}${UEFISUFF}
 
@@ -303,23 +426,20 @@ setenv_raid10 () {
     BOOTPART3=${DISK3}${PSEP3}${BOOTSUFF}
     BOOTPART4=${DISK4}${PSEP4}${BOOTSUFF}
 
-    if_bootext4  setenv_bootext4
-    if_bootbtrfs setenv_bootbtrfs
+    if_boot_ext4  setenv_bootext4
+    if_boot_btrfs setenv_bootbtrfs
     
     ROOTPDEV1=${DISK1}${PSEP1}${ROOTSUFF}
     ROOTPDEV2=${DISK2}${PSEP2}${ROOTSUFF}
     ROOTPDEV3=${DISK3}${PSEP3}${ROOTSUFF}
     ROOTPDEV4=${DISK4}${PSEP4}${ROOTSUFF}
     
-    SWAPPDEV1=${DISK1}${PSEP1}${SWAPSUFF}
-    SWAPPDEV2=${DISK2}${PSEP2}${SWAPSUFF}
-    SWAPPDEV3=${DISK3}${PSEP3}${SWAPSUFF}
-    SWAPPDEV4=${DISK4}${PSEP4}${SWAPSUFF}
-
     UEFIPARTS="${UEFIPART1} ${UEFIPART2} ${UEFIPART3} ${UEFIPART4}"
     BOOTPARTS="${BOOTPART1} ${BOOTPART2} ${BOOTPART3} ${BOOTPART4}"
     ROOTPDEVS="${ROOTPDEV1} ${ROOTPDEV2} ${ROOTPDEV3} ${ROOTPDEV4}"
-    SWAPPDEVS="${SWAPPDEV1} ${SWAPPDEV2} ${SWAPPDEV3} ${SWAPPDEV4}"
+
+    if_swappart \
+        setenv_raid10_swap
 }
 
 setenv_${DISKLAYOUT}
@@ -369,14 +489,12 @@ num_args () {
 ROOTPART="`first ${ROOTPARTS}`"
 
 singboot_partitions () {
+    if [ "${WIPEOUT}" == yes ] ; then
+        # First, wipeout the disk:
+        skip_if_resuming sgdisk -o $DISK
+    fi
     make_biosuefipar $DISK
     make_partitions $DISK
-}
-
-wipeout_partitions () {
-    # First, wipeout the disk:
-    skip_if_resuming sgdisk -o $DISK
-    singboot_partitions $DISK
 }
 
 dualboot_partitions () {
@@ -395,7 +513,7 @@ do_reopen_raid10_partitions () {
 
 reopen_raid10_partitions () {
     if_bootpart \
-        if_bootext4 \
+        if_boot_ext4 \
         do_reopen_raid10_partitions
 }
 
@@ -419,7 +537,7 @@ do_bootparts () {
 create_raid10_partitions () {
 
     if_bootpart \
-        if_bootext4 \
+        if_boot_ext4 \
         mdadm --stop --scan
     
     sgdisk -o $DISK1
@@ -440,7 +558,7 @@ create_raid10_partitions () {
     do_make_partitions $DISK4
 
     if_bootpart \
-        if_bootext4 \
+        if_boot_ext4 \
         do_bootparts $BOOTPARTS
 }
 
@@ -485,53 +603,116 @@ crypt_partitions () {
     fi
 }
 
+build_bootpart_btrfs () {
+    mkfs.btrfs ${FORCBTRFS} -L boot ${MKFSBTRFS} ${BOOTPARTS}
+    mount_bpartitions_btrfs
+}
+
+build_bootpart_ext4 () {
+    mkfs.ext4 ${FORCEEXT4} -L boot ${BOOTPART}
+    mount_bpartitions_ext4
+}
+
+build_bootpart_zfs () {
+    zpool create ${FORCEZFS} \
+          -o ashift=12 \
+          -o autotrim=on \
+          -o compatibility=grub2 \
+          -o cachefile=/etc/zfs/zpool.cache \
+          -O devices=off \
+          -O acltype=posixacl -O xattr=sa \
+          -O compression=on \
+          -O normalization=formD \
+          -O relatime=on \
+          -O canmount=off -O mountpoint=/boot -R ${ROOTDIR} \
+          bpool ${BOOTPART}
+    zfs create -o canmount=off -o mountpoint=none bpool/BOOT
+    zfs create -o mountpoint=/boot bpool/BOOT/${DESTNAME}
+}
+
+build_rootpart_btrfs () {
+    mkfs.btrfs ${FORCBTRFS} -L root ${MKFSBTRFS} ${ROOTPARTS}
+
+    mount ${ROOTPART} ${ROOTDIR}
+    btrfs subvolume create ${ROOTDIR}/@
+    mkdir -p ${ROOTDIR}/@/boot
+    mkdir -p ${ROOTDIR}/@/home
+    btrfs subvolume create ${ROOTDIR}/@home
+    umount -l ${ROOTDIR}
+    mount_rpartitions_btrfs
+}
+
+build_rootpart_ext4 () {
+    mkfs.ext4 ${FORCEEXT4} -L root ${ROOTPART}
+    mount_rpartitions_ext4
+}
+
+build_rootpart_zfs () {
+    zpool create ${FORCEZFS} \
+          -o ashift=12 \
+          -o autotrim=on \
+          -O acltype=posixacl -O xattr=sa -O dnodesize=auto \
+          -O compression=lz4 \
+          -O normalization=formD \
+          -O relatime=on \
+          -O canmount=off -O mountpoint=none -R ${ROOTDIR} \
+          rpool ${ROOTPART}
+    
+    zfs create -o canmount=off -o mountpoint=none rpool/ROOT
+    zfs create -o canmount=on  -o mountpoint=/    rpool/ROOT/${DESTNAME}
+    zfs create                                    rpool/ROOT/${DESTNAME}/home
+    zfs create -o canmount=off                    rpool/ROOT/${DESTNAME}/usr
+    zfs create                                    rpool/ROOT/${DESTNAME}/usr/local
+    zfs create -o canmount=off                    rpool/ROOT/${DESTNAME}/var
+    zfs create                                    rpool/ROOT/${DESTNAME}/var/lib
+    zfs create                                    rpool/ROOT/${DESTNAME}/var/lib/apt
+    zfs create                                    rpool/ROOT/${DESTNAME}/var/lib/dpkg
+    zfs create                                    rpool/ROOT/${DESTNAME}/var/log
+    zfs create                                    rpool/ROOT/${DESTNAME}/var/spool
+    skip_if_bootpart zfs create                   rpool/ROOT/${DESTNAME}/boot
+}
+
 build_partitions () {
 
-    if [ "$DISKLAYOUT" == wipeout ] || [ "$DISKLAYOUT" == raid10 ] ; then
+    if [ "$WIPEOUT" == yes ] ; then
         FORCEEXT4="-F"
+        FORCEZFS="-f"
         FORCBTRFS="-f"
     fi
-
-    if_bootext4 if_bootpart mkfs.ext4  ${FORCEEXT4} -L boot ${BOOTPART}
 
     if [ "$DISKLAYOUT" = raid10 ] ; then
         MKFSBTRFS="-m raid10 -d raid10"
     fi
-    
-    if_bootbtrfs \
-        if_bootpart \
-        mkfs.btrfs ${FORCBTRFS} -L boot ${MKFSBTRFS} ${BOOTPARTS}
-    mkfs.btrfs ${FORCBTRFS} -L root ${MKFSBTRFS} ${ROOTPARTS}
+
+    build_rootpart_${ROOTFS}
+
+    if_bootpart \
+        build_bootpart_${BOOTFS}
+
+    mount_epartitions
 
     for SWAPPART in ${SWAPPARTS} ; do
         mkswap ${SWAPPART}
     done
 
-    mount ${ROOTPART} ${ROOTDIR}
-    btrfs subvolume create ${ROOTDIR}/@
-    mkdir ${ROOTDIR}/@/boot
-    mkdir ${ROOTDIR}/@/home
-    btrfs subvolume create ${ROOTDIR}/@home
-
     if [ "${ENCRYPT}" == yes ] ; then
-        dd if=/dev/urandom bs=512 count=1 of=${ROOTDIR}/@/crypto_keyfile.bin
-        chmod go-rw ${ROOTDIR}/@/crypto_keyfile.bin
+        dd if=/dev/urandom bs=512 count=1 of=${ROOTDIR}/crypto_keyfile.bin
+        chmod go-rw ${ROOTDIR}/crypto_keyfile.bin
         for PDEV in ${ROOTPDEVS} ${SWAPPDEVS} ; do
-            printf "%s" "$KEY_"|cryptsetup luksAddKey ${PDEV} ${ROOTDIR}/@/crypto_keyfile.bin --key-file -
+            printf "%s" "$KEY_"|cryptsetup luksAddKey ${PDEV} ${ROOTDIR}/crypto_keyfile.bin --key-file -
         done
     fi
-
-    if_bootpart mount ${BOOTPART} ${ROOTDIR}/@/boot
-    mkdir ${ROOTDIR}/@/boot/efi
-    umount ${ROOTDIR}/@/boot
-    umount ${ROOTDIR}
 }
 
 setup_aptinstall () {
-    echo "deb http://deb.debian.org/debian ${VERSNAME} main contrib"         > /etc/apt/sources.list
+    echo "deb http://deb.debian.org/debian ${VERSNAME} main contrib non-free-firmware" > /etc/apt/sources.list
     # echo "deb http://deb.debian.org/debian ${VERSNAME}-backports main contrib" >> /etc/apt/sources.list
     apt-get update --yes
-    apt-get install --yes debootstrap curl net-tools efibootmgr
+    INSPACKS="debootstrap curl net-tools efibootmgr"
+    if [ "${ROOTFS}" == zfs ] ; then
+        INSPACKS+=" zfsutils-linux"
+    fi
+    apt-get install --yes ${INSPACKS}
 }
 
 config_nic () {
@@ -556,18 +737,93 @@ config_hostname () {
       ) > /etc/hosts
 }
 
-mount_partitions () {
+mount_uefi () {
+    mkdir -p ${ROOTDIR}/boot/efi
+    mount ${UEFIPART} ${ROOTDIR}/boot/efi
+}
+
+mount_bpartitions () {
+    if_bootpart mount ${BOOTPART} ${ROOTDIR}/boot
+}
+
+mount_epartitions () {
+    if_uefi \
+        skip_if_proxmox \
+        mount_uefi
+}
+
+mount_bpartitions_btrfs () {
+    mount_bpartitions
+}
+
+mount_bpartitions_ext4 () {
+    mount_bpartitions
+}
+
+mount_bpartitions_zfs () {
+    zpool import bpool -R ${ROOTDIR}
+}
+
+mount_rpartitions_btrfs () {
     mount ${ROOTPART} ${ROOTDIR} -o subvol=@
     mount ${ROOTPART} ${ROOTDIR}/home -o subvol=@home
-    if_bootpart mount ${BOOTPART} ${ROOTDIR}/boot
-    if_uefipart mount ${UEFIPART} ${ROOTDIR}/boot/efi
+}
+
+mount_rpartitions_ext4 () {
+    mount ${ROOTPART} ${ROOTDIR}
+}
+
+mount_rpartitions_zfs () {
+    zpool import rpool -R ${ROOTDIR}
+}
+
+unmount_bpartitions () {
+    umount -l ${ROOTDIR}/boot
+}
+
+unmount_epartitions () {
+    if_uefi \
+        skip_if_proxmox \
+        umount -l ${ROOTDIR}/boot/efi
+}
+
+unmount_bpartitions_btrfs () {
+    unmount_bpartitions
+}
+
+unmount_bpartitions_ext4 () {
+    unmount_bpartitions
+}
+
+unmount_bpartitions_zfs () {
+    zpool export bpool
+}
+
+unmount_rpartitions_btrfs () {
+    umount -l ${ROOTDIR}/home
+    umount -l ${ROOTDIR}
+}
+
+unmount_rpartitions_ext4 () {
+    umount -l ${ROOTDIR}
+}
+
+unmount_rpartitions_zfs () {
+    zpool export rpool
+}
+
+mount_partitions () {
+    mount_rpartitions_${ROOTFS}
+    if_bootpart \
+        mount_bpartitions_${BOOTFS}
+    mount_epartitions
 }
 
 unmount_partitions () {
-    if_uefipart umount -l ${ROOTDIR}/boot/efi
-    if_bootpart umount -l ${ROOTDIR}/boot
-    umount -l ${ROOTDIR}/home
-    umount -l ${ROOTDIR}
+    unmount_epartitions
+    if_bootpart \
+        unmount_bpartitions_${BOOTFS}
+    unmount_rpartitions_${ROOTFS}
 }
 
 config_grubip () {
@@ -606,33 +862,44 @@ remove_grubenc () {
         > /etc/default/grub
 }
 
-config_grub () {
+config_boot () {
     if [ "$EFI_" == "0" ]; then
         # FOR BIOS:
         apt-get install --yes grub-pc
         grub-install $DISK
     else
-        # FOR UEFI:
-        apt-get install --yes grub-efi-amd64 shim-signed
-	# --bootloader-id=debian
-        grub-install --target=x86_64-efi --efi-directory=/boot/efi --recheck --no-floppy
+        if [ "${DISTRO}" != proxmox ] ; then
+            # FOR UEFI:
+            apt-get install --yes grub-efi-amd64 shim-signed
+	    # --bootloader-id=debian
+            grub-install --target=x86_64-efi --efi-directory=/boot/efi --recheck --no-floppy
+        fi
     fi
 }
 
 dump_fstab () {
 
-    if_uefipart echo "UUID=$(blkid -s UUID -o value ${UEFIPART}) /boot/efi vfat  defaults,noatime 0 2"
-    if_bootpart echo "UUID=$(blkid -s UUID -o value ${BOOTPART}) /boot     ${BOOTFS}  defaults,noatime 0 2"
+    if_uefi \
+        skip_if_proxmox \
+        echo "UUID=$(blkid -s UUID -o value ${UEFIPART}) /boot/efi vfat  defaults,noatime 0 2"
+    
+    if_bootpart \
+        skip_if_bootfs_zfs \
+        echo "UUID=$(blkid -s UUID -o value ${BOOTPART}) /boot     ${BOOTFS}  defaults,noatime 0 2"
     
     if [ "${ENCRYPT}" == yes ] ; then
         ROOTDEV="${ROOTPART}                  "
     else
         ROOTDEV="UUID=$(blkid -s UUID -o value ${ROOTPART})"
     fi
-    
-    echo "$ROOTDEV /         btrfs     subvol=@,defaults,noatime,compress,space_cache,autodefrag 0 1"
-    echo "$ROOTDEV /home     btrfs subvol=@home,defaults,noatime,compress,space_cache,autodefrag 0 2"
 
+    if [ ${ROOTFS} == "btrfs" ] ; then
+        echo "$ROOTDEV /         btrfs     subvol=@,defaults,noatime,compress,space_cache=v2,autodefrag 0 1"
+        echo "$ROOTDEV /home     btrfs subvol=@home,defaults,noatime,compress,space_cache=v2,autodefrag 0 2"
+    elif  [ ${ROOTFS} == "ext4" ] ; then
+        echo "$ROOTDEV /         ext4     defaults,noatime 0 1"
+    fi
+    
     for SWAPPART in ${SWAPPARTS} ; do
         if [ "${ENCRYPT}" == yes ] ; then
             SWAPDEV="${SWAPPART}                   "
@@ -968,14 +1235,18 @@ config_crypttab () {
 config_encryption () {
     if [ "${ENCRYPT}" == yes ] ; then
         
-        skip_if_bootpart config_grubenc
+        skip_if_bootpart \
+            skip_if_proxmox \
+            config_grubenc
         
         if [ "$TANGSERV" != "" ] # || [ "$TPMVERSION" == "1" ]
         then
-            config_grubip
+            skip_if_proxmox \
+                config_grubip
             config_network
         else
-            remove_grubip
+            skip_if_proxmox \
+                remove_grubip
             remove_network
         fi
         if [ "$TANGSERV" != "" ] || [ "$TPMVERSION" == "2" ] ; then
@@ -1008,7 +1279,9 @@ config_encryption () {
             remove_clevis_tpm2
         fi
     else
-        skip_if_bootpart remove_grubenc
+        skip_if_bootpart \
+            skip_if_proxmox \
+            remove_grubenc
     fi
 }
 
@@ -1029,7 +1302,7 @@ recheck_tpm2 () {
 
 inspkg_encryption () {
     if [ "${ENCRYPT}" == yes ] ; then
-        ENCPACKS="cryptsetup"
+        ENCPACKS="cryptsetup cryptsetup-initramfs"
         if [ "$TANGSERV" != "" ] || [ "$TPMVERSION" == "2" ] ; then
             ENCPACKS+=" clevis"
             if [ "$TPMVERSION" == "2" ] ; then
@@ -1070,7 +1343,22 @@ show_settings () {
     echo ENCRYPT=${ENCRYPT}
     echo DISK=${DISK}
     echo BIOSSUFF=${BIOSSUFF}
+    echo UEFISUFF=${UEFISUFF}
+    echo BOOTSUFF=${BOOTSUFF}
+    echo ROOTSUFF=${ROOTSUFF}
+    echo SWAPSUFF=${SWAPSUFF}
     echo ROOTPARTS=${ROOTPARTS}
+    echo "Boot Mode: "`if_else_uefi "echo UEFI" "echo BIOS"`
+}
+
+update_boot () {
+    if [ "${DISTRO}" == proxmox ] ; then
+        echo "boot=zfs root=ZFS=rpool/ROOT/${DESTNAME} rw" > /etc/kernel/cmdline
+        rm -f /etc/kernel/proxmox-boot-uuids
+        proxmox-boot-tool init ${UEFIPART}
+    else
+        update-grub
+    fi
 }
 
 do_chroot () {
@@ -1079,17 +1367,18 @@ do_chroot () {
     config_admin
     config_aptcacher
     config_initpacks
-    # if_bootpart \
-    #     if_bootext4 \
-    #     apt-get install --yes mdadm
+    if_bootpart \
+        if_boot_ext4 \
+        if_raid10 \
+        apt-get install --yes mdadm
     config_fstab
-    config_grub
+    config_boot
     inspkg_encryption
     config_encryption
     config_crypttab
     config_noresume
     config_suspend
-    update-grub
+    update_boot
     config_init
     apt update
     apt --yes full-upgrade
@@ -1103,8 +1392,19 @@ fix_tpm () {
     update-initramfs -c -k all
 }
 
-wipeout () {
+check_prereq () {
+    if [ "${ROOTFS}" == zfs ] || [ "${BOOTFS}" == zfs ] ; then
+        apt install --yes mokutil
+        if [ "`mokutil --sb-state`" == "SecureBoot enabled" ] ; then
+            echo "ERROR: Installing a zfs file system with SecureBoot enabled is not supported"
+            exit 1
+        fi
+    fi
+}
+
+install () {
     ROOTDIR=/mnt
+    check_prereq
     show_settings
     warn_confirm
     if_else_resuming \
@@ -1116,14 +1416,19 @@ wipeout () {
     skip_if_resuming \
         crypt_partitions
     open_partitions
-    skip_if_resuming \
+    if_else_resuming \
+        mount_partitions \
         build_partitions
-    mount_partitions
     exec_once unpack_distro
     setup_apt
     bind_dirs
     config_chroot
     run_chroot /home/${USERNAME}/deploy/deploy.sh do_chroot
+    if [ "${ROOTFS}" == zfs ] || [ "${BOOTFS}" == zfs ] ; then
+        if [ -f /etc/zfs/zpool.cache ] ; then
+            cp /etc/zfs/zpool.cache ${ROOTDIR}/etc/zfs/zpool.cache
+        fi
+    fi
     unbind_dirs
     unmount_partitions
     close_partitions
@@ -1151,7 +1456,7 @@ rescue_live () {
 }
 
 if [ $# = 0 ] ; then
-    wipeout
+    install
 else
     $*
 fi

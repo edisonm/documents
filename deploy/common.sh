@@ -51,14 +51,13 @@ config_aptcacher () {
 }
 
 setup_apt () {
+    if [ "${VERSNAME}" == "bookworm" ] ; then
+        NONFREE="non-free-firmware"
+    else
+        NONFREE="non-free"
+    fi
     setup_apt_${DISTRO}
 }
-
-if [ "${VERSNAME}" == bookworm ] ; then
-    NONFREE=non-free-firmware
-else
-    NONFREE=non-free
-fi
 
 setup_apt_debian () {
     cat <<'EOF' | sed -e s:'<VERSNAME>':"${VERSNAME}":g \
@@ -96,6 +95,16 @@ deb-src http://archive.ubuntu.com/ubuntu <VERSNAME>-security main restricted uni
 EOF
 }
 
+setup_apt_proxmox () {
+    setup_apt_debian
+    
+    cat <<'EOF' | sed -e s:'<VERSNAME>':"${VERSNAME}":g \
+                      > ${ROOTDIR}/etc/apt/sources.list.d/${VERSNAME}-pve-install-repo.list
+deb [arch=amd64] http://download.proxmox.com/debian/pve <VERSNAME> pve-no-subscription
+EOF
+    wget https://enterprise.proxmox.com/debian/proxmox-release-bookworm.gpg -O ${ROOTDIR}/etc/apt/trusted.gpg.d/proxmox-release-bookworm.gpg
+}
+
 config_admin () {
     ( printf "%s\n%s\n${FULLNAME}\n\n\n\n\nY\n" "$KEY_" "$KEY_" | adduser $USERNAME ) || true
     usermod -aG sudo $USERNAME
@@ -103,17 +112,27 @@ config_admin () {
 }
 
 config_init () {
+    INIPACKS=""
     if [ "$(dmidecode -s system-manufacturer)" == "QEMU" ] ; then
-        apt-get install --yes qemu-guest-agent
+        INIPACKS+=" qemu-guest-agent"
     fi
     # os-prober is needed only on dual-boot systems:
     apt-get remove --yes --purge os-prober
-    apt-get install --yes sudo btrfs-progs
+    INIPACKS+=" sudo btrfs-progs"
     if [ "$DISTRO" == "debian" ] ; then
-        apt-get install --yes debconf-utils linux-image-`dpkg --print-architecture`
+        INIPACKS+=" debconf-utils linux-image-`dpkg --print-architecture`"
+    elif  [ "$DISTRO" == "proxmox" ] ; then
+        INIPACKS+=" debconf-utils pve-kernel-6.2"
+        if [ "$PROXMOX" == "full" ] ; then
+            INIPACKS+=" proxmox-ve postfix open-iscsi chrony zfs-initramfs"
+        else
+            INIPACKS+=" zfsutils-linux zfs-zed zfs-initramfs"
+        fi
     elif [ "$DISTRO" == "ubuntu" ] ; then
-        apt-get install --yes debconf-i18n linux-image-generic
+        INIPACKS+=" debconf-i18n linux-image-generic"
     fi
+    echo "Installing basic packages"
+    apt-get install --yes $INIPACKS
     echo "Installing extra packages"
     apt-get install --yes $DEBPACKS
 }
@@ -137,8 +156,11 @@ config_initpacks () {
       echo "keyboard-configuration keyboard-configuration/variant    select English (US)" ; \
       ) | debconf-set-selections -v
     apt-get install --yes locales console-setup initramfs-tools
-    if [ "${DISTRO}" == debian ] ; then
+    if [ "${DISTRO}" == debian ] || [ "${DISTRO}" == proxmox ] ; then
         dpkg-reconfigure locales tzdata keyboard-configuration console-setup -f noninteractive
+        if [ "${DISTRO}" == proxmox ] ; then
+            apt-get install --yes proxmox-kernel-helper systemd-boot
+        fi
     elif [ "${DISTRO}" == ubuntu ] ; then
         dpkg-reconfigure locales tzdata keyboard-configuration console-setup
     fi
