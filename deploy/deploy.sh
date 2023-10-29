@@ -25,8 +25,9 @@
 # fixes.  Don't update it without considering that the filesystem layout could
 # change in newer versions of these scripts.
 
-# Note: encrypted proxmox with no boot partition will means all the drive except
-# the efi partition will be encrypted.
+# Note: Encrypted Proxmox with no boot partition will means all the drive except
+# the efi partition will be encrypted. That is possible since Proxmox keep the
+# kernel in the EFI partition.
 
 # Machine specific configuration:
 USERNAME=admin
