@@ -8,27 +8,6 @@
 
 # Script to automate deployment of Debian/Ubuntu in several scenarios
 
-# Assumptions: this will be used in a machine of minimum 32GB of storage
-# (recommented 64GB), 8GB RAM, it support UEFI or BIOS, the root fs will be a
-# btrfs encrypted via LUKS, password-less unlock via a key-file which is
-# encrypted via clevis+(tang or tpm2) or tpm1, and password input via keyboard
-# as failover.  We can not use dracut since is too much hastle, and proxmox is
-# not compatible with it yet.
-
-# Implementation guidelines:
-
-# - Questions are allowed only at the beginning, and once settled, the installer
-#   must run in a non-interactive way.
-
-# WARNING: once the system is deployed, a copy of this script will remain in
-# /home/$USERNAME/deploy/ to perform maintenance tasks, reconfigurations or
-# fixes.  Don't update it without considering that the filesystem layout could
-# change in newer versions of these scripts.
-
-# Note: Encrypted Proxmox with no boot partition will means all the drive except
-# the efi partition will be encrypted. That is possible since Proxmox keep the
-# kernel in the EFI partition.
-
 # Machine specific configuration:
 USERNAME=admin
 FULLNAME="Administrative Account"
@@ -39,8 +18,13 @@ DESTNAME=debian3
 # DISTRO=ubuntu
 DISTRO=proxmox
 
+# Debian versions
 # VERSNAME=bullseye
 VERSNAME=bookworm
+
+# Ubuntu versions
+# VERSNAME=focal
+# VERSNAME=jammy
 
 # Specifies wether you want to install the full proxmox or only the kernel plus
 # the boot utils.  Note: you must choose PROXMOX=boot if you want to use zfs
@@ -94,8 +78,9 @@ UEFISIZE=+1G
 # BOOTFS=btrfs
 BOOTFS=zfs
 
-# Root partition size, 0 for max available space
+# Root partition size, 0 for max available space, minimum ~20GB
 ROOTSIZE=0
+# ROOTSIZE=+32G
 # ROOTSIZE=+64G
 
 # root partition file system to be used
@@ -103,7 +88,8 @@ ROOTSIZE=0
 # ROOTFS=btrfs
 ROOTFS=zfs
 
-# Swap partition size, placed at the end, empty for no swap
+# Swap partition size, placed at the end, empty for no swap, it is recommended
+# to be equal to the available RAM memory
 SWAPSIZE=-8G
 # SWAPSIZE=-16G
 
@@ -1477,7 +1463,7 @@ rescue () {
     open_partitions
     mount_partitions
     bind_dirs
-    config_chroot
+    # config_chroot
     run_chroot
     unbind_dirs
     unmount_partitions
