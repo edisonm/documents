@@ -11,26 +11,27 @@
 # Machine specific configuration:
 USERNAME=admin
 FULLNAME="Administrative Account"
-DESTNAME=debian3
+DESTNAME=ubuntu1
 
-# Distributon.  Note that proxmox is based on debian.
+# Distributon.
 # DISTRO=debian
-# DISTRO=ubuntu
-DISTRO=proxmox
+DISTRO=ubuntu
 
 # Debian versions
 # VERSNAME=bullseye
-VERSNAME=bookworm
+# VERSNAME=bookworm
 
 # Ubuntu versions
 # VERSNAME=focal
-# VERSNAME=jammy
+VERSNAME=jammy
 
 # Specifies wether you want to install the full proxmox or only the kernel plus
-# the boot utils.  Note: you must choose PROXMOX=boot if you want to use zfs
+# the boot utils.  Note: you must choose PROXMOX=boot if you want to use zfs.
+# Leave it emtpy to skip proxmox installation.
 
+PROXMOX=
 # PROXMOX=full
-PROXMOX=boot
+# PROXMOX=boot
 
 # APT Cache Server, leave it empty to disable:
 APTCACHER=10.8.0.1
@@ -71,7 +72,7 @@ WIPEOUT=yes
 UEFISIZE=+1G
 
 # Boot partition size, empty for no separated boot partition.
-# BOOTSIZE=+2G
+BOOTSIZE=+2G
 
 # boot partition file system to be used
 # BOOTFS=ext4
@@ -209,8 +210,22 @@ skip_if_bootpart () {
 }
 
 skip_if_proxmox () {
-    if [ "${DISTRO}" != "proxmox" ] ; then
+    if [ "${PROXMOX}" == "" ] ; then
         $*
+    fi
+}
+
+if_proxmox () {
+    if [ "${PROXMOX}" != "" ] ; then
+        $*
+    fi
+}
+
+if_else_proxmox () {
+    if [ "${PROXMOX}" != "" ] ; then
+        $1
+    else
+        $2
     fi
 }
 
@@ -481,7 +496,7 @@ num_args () {
 
 ROOTPART="`first ${ROOTPARTS}`"
 
-singboot_partitions () {
+partitions_singboot () {
     if [ "${WIPEOUT}" == yes ] ; then
         # First, wipeout the disk:
         skip_if_resuming sgdisk -o $DISK
@@ -490,11 +505,11 @@ singboot_partitions () {
     make_partitions $DISK
 }
 
-dualboot_partitions () {
+partitions_dualboot () {
     make_partitions ${DISK}
 }
 
-dualboot4_partitions () {
+partitions_dualboot4 () {
     make_partitions ${DISK}
 }
 
@@ -510,7 +525,7 @@ reopen_raid10_partitions () {
         do_reopen_raid10_partitions
 }
 
-raid10_partitions () {
+partitions_raid10 () {
     if_else_resuming \
         reopen_raid10_partitions \
         create_raid10_partitions
@@ -701,7 +716,9 @@ encrypt_partitions () {
 }
 
 setup_aptinstall () {
-    echo "deb http://deb.debian.org/debian ${VERSNAME} main contrib non-free-firmware" > /etc/apt/sources.list
+    if [ "${DISTRO}" != ubuntu ] ; then
+        echo "deb http://deb.debian.org/debian ${VERSNAME} main contrib non-free-firmware" > /etc/apt/sources.list
+    fi
     # echo "deb http://deb.debian.org/debian ${VERSNAME}-backports main contrib" >> /etc/apt/sources.list
     apt-get update --yes
     INSPACKS="debootstrap curl net-tools efibootmgr"
@@ -712,6 +729,7 @@ setup_aptinstall () {
 }
 
 config_nic () {
+    mkdir -p /etc/network/interfaces.d
     for nic in `ls /sys/class/net` ; do
         ( echo "auto $nic"
           if [ "$nic" != "lo" ] ; then
@@ -858,18 +876,22 @@ remove_grubenc () {
         > /etc/default/grub
 }
 
+config_boot_efi () {
+    # FOR UEFI:
+    apt-get install --yes grub-efi-amd64 shim-signed
+    # --bootloader-id=debian
+    grub-install --target=x86_64-efi --efi-directory=/boot/efi --recheck --no-floppy
+    apt-get --yes autoremove
+}
+
 config_boot () {
     if [ "$EFI_" == "0" ]; then
         # FOR BIOS:
         apt-get install --yes grub-pc
         grub-install $DISK
     else
-        if [ "${DISTRO}" != proxmox ] ; then
-            # FOR UEFI:
-            apt-get install --yes grub-efi-amd64 shim-signed
-	    # --bootloader-id=debian
-            grub-install --target=x86_64-efi --efi-directory=/boot/efi --recheck --no-floppy
-        fi
+        skip_if_proxmox \
+            config_boot_efi
     fi
 }
 
@@ -1347,14 +1369,20 @@ show_settings () {
     echo "Boot Mode: "`if_else_uefi "echo UEFI" "echo BIOS"`
 }
 
+update_boot_proxmox () {
+    echo "boot=zfs root=ZFS=rpool/ROOT/${DESTNAME} rw" > /etc/kernel/cmdline
+    rm -f /etc/kernel/proxmox-boot-uuids
+    proxmox-boot-tool init ${UEFIPART}
+}
+
 update_boot () {
-    if [ "${DISTRO}" == proxmox ] ; then
-        echo "boot=zfs root=ZFS=rpool/ROOT/${DESTNAME} rw" > /etc/kernel/cmdline
-        rm -f /etc/kernel/proxmox-boot-uuids
-        proxmox-boot-tool init ${UEFIPART}
-    else
+    if_else_proxmox \
+        update_boot_proxmox \
         update-grub
-    fi
+}
+
+config_zfs_bpool () {
+    systemctl enable zfs-import-bpool.service
 }
 
 chroot_install () {
@@ -1362,20 +1390,22 @@ chroot_install () {
     config_nic
     config_admin
     config_aptcacher
-    config_initpacks
+    config_instpacks
     if_bootpart \
         if_boot_ext4 \
         if_raid10 \
         apt-get install --yes mdadm
     config_fstab
-    config_boot
     inspkg_encryption
     config_encryption
     config_crypttab
     config_noresume
     config_suspend
+    if_zfs \
+        if_bootpart \
+        config_zfs_bpool
+    config_boot
     update_boot
-    config_init
     apt update
     apt --yes full-upgrade
     update-initramfs -c -k all
@@ -1403,7 +1433,7 @@ fix_tpm () {
 
 check_prereq () {
     apt install --yes mokutil
-    if [ "`mokutil --sb-state`" == "SecureBoot enabled" ] ; then
+    if [ "`mokutil --sb-state`" == "SecureBoot enabled" ] && [ "${DISTRO}" != ubuntu ] ; then
         echo "ERROR: Installing a zfs file system with SecureBoot enabled is not supported"
         exit 1
     fi
@@ -1418,7 +1448,7 @@ prepare_partitions () {
         set_key
     config_aptcacher
     setup_aptinstall
-    ${DISKLAYOUT}_partitions
+    partitions_${DISKLAYOUT}
     skip_if_resuming \
         crypt_partitions
     open_partitions
@@ -1435,20 +1465,52 @@ if_zfs () {
 
 cp_zpool_cache () {
     if [ -f /etc/zfs/zpool.cache ] ; then
+        mkdir -p ${ROOTDIR}/etc/zfs
         cp /etc/zfs/zpool.cache ${ROOTDIR}/etc/zfs/zpool.cache
     fi
 }
 
+setup_zfs_bpool () {
+    mkdir -p ${ROOTDIR}/etc/systemd/system
+    cat <<'EOF' | sed -e s:'<VERSNAME>':"${VERSNAME}":g \
+                      > ${ROOTDIR}/etc/systemd/system/zfs-import-bpool.service
+[Unit]
+DefaultDependencies=no
+Before=zfs-import-scan.service
+Before=zfs-import-cache.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/sbin/zpool import -N -o cachefile=none bpool
+# Work-around to preserve zpool cache:
+ExecStartPre=-/bin/mv /etc/zfs/zpool.cache /etc/zfs/preboot_zpool.cache
+ExecStartPost=-/bin/mv /etc/zfs/preboot_zpool.cache /etc/zfs/zpool.cache
+
+[Install]
+WantedBy=zfs-import.target
+EOF
+}
+
 install () {
     prepare_partitions
+    exec_once \
+        unpack_distro
     setup_apt
-    exec_once unpack_distro
-    skip_if_resuming if_encrypt create_keyfile
-    skip_if_resuming if_encrypt encrypt_partitions
+    skip_if_resuming \
+        if_encrypt \
+        create_keyfile
+    skip_if_resuming \
+        if_encrypt \
+        encrypt_partitions
     bind_dirs
     config_chroot
+    if_zfs \
+        cp_zpool_cache
+    if_zfs \
+        if_bootpart \
+        setup_zfs_bpool
     run_chroot /home/${USERNAME}/deploy/deploy.sh chroot_install
-    if_zfs cp_zpool_cache
     unbind_dirs
     unmount_partitions
     close_partitions
@@ -1459,7 +1521,7 @@ rescue () {
     ask_key
     config_aptcacher
     setup_aptinstall
-    ${DISKLAYOUT}_partitions
+    partitions_${DISKLAYOUT}
     open_partitions
     mount_partitions
     bind_dirs

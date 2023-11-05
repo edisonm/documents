@@ -79,6 +79,9 @@ EOF
 deb http://deb.debian.org/debian <VERSNAME>-backports main contrib <NONFREE>
 deb-src http://deb.debian.org/debian <VERSNAME>-backports main contrib <NONFREE>
 EOF
+
+    if_proxmox setup_apt_proxmox
+    
 }
 
 setup_apt_ubuntu () {
@@ -96,8 +99,6 @@ EOF
 }
 
 setup_apt_proxmox () {
-    setup_apt_debian
-    
     cat <<'EOF' | sed -e s:'<VERSNAME>':"${VERSNAME}":g \
                       > ${ROOTDIR}/etc/apt/sources.list.d/${VERSNAME}-pve-install-repo.list
 deb [arch=amd64] http://download.proxmox.com/debian/pve <VERSNAME> pve-no-subscription
@@ -108,26 +109,58 @@ EOF
 config_admin () {
     ( printf "%s\n%s\n${FULLNAME}\n\n\n\n\nY\n" "$KEY_" "$KEY_" | adduser $USERNAME ) || true
     usermod -aG sudo $USERNAME
+    chown -R $USERNAME:$USERNAME /home/$USERNAME
     # printf "%s\n%s\n" "$KEY_" "$KEY_" | passwd root
 }
 
-config_init () {
-    INIPACKS=""
+config_instpacks_debian () {
+    INIPACKS+=" linux-image-`dpkg --print-architecture`"
+}
+
+config_instpacks_proxmox_boot () {
+    true
+}
+
+config_instpacks_proxmox_full () {
+    INIPACKS+=" proxmox-ve postfix open-iscsi chrony"
+}
+
+config_instpacks_proxmox () {
+    INIPACKS+=" pve-kernel-6.2 proxmox-kernel-helper systemd-boot"
+    config_instpacks_proxmox_${PROXMOX}
+}
+
+config_reconfig_debian () {
+    dpkg-reconfigure locales tzdata keyboard-configuration console-setup -f noninteractive
+}
+
+config_reconfig_ubuntu () {
+    dpkg-reconfigure locales tzdata keyboard-configuration console-setup
+}
+
+config_instpacks_zfs () {
+    INIPACKS+=" zfsutils-linux zfs-initramfs"
+}
+
+config_instpacks () {
+    config_initpacks
+    apt-get install --yes locales console-setup initramfs-tools
+    config_reconfig_${DISTRO}
+    INIPACKS="$*"
     if [ "$(dmidecode -s system-manufacturer)" == "QEMU" ] ; then
         INIPACKS+=" qemu-guest-agent"
     fi
+    if_zfs config_instpacks_zfs
     # os-prober is needed only on dual-boot systems:
-    apt-get remove --yes --purge os-prober
+    if [ "${DISKLAYOUT}" != "dualboot" ] && [ "${DISKLAYOUT}" != "dualboot4" ] ; then
+        apt-get remove --yes --purge os-prober
+    fi
     INIPACKS+=" sudo btrfs-progs"
     if [ "$DISTRO" == "debian" ] ; then
-        INIPACKS+=" debconf-utils linux-image-`dpkg --print-architecture`"
-    elif  [ "$DISTRO" == "proxmox" ] ; then
-        INIPACKS+=" debconf-utils pve-kernel-6.2"
-        if [ "$PROXMOX" == "full" ] ; then
-            INIPACKS+=" proxmox-ve postfix open-iscsi chrony zfs-initramfs"
-        else
-            INIPACKS+=" zfsutils-linux zfs-zed zfs-initramfs"
-        fi
+        INIPACKS+=" debconf-utils"
+        if_else_proxmox \
+            config_instpacks_proxmox \
+            config_instpacks_debian
     elif [ "$DISTRO" == "ubuntu" ] ; then
         INIPACKS+=" debconf-i18n linux-image-generic"
     fi
@@ -144,8 +177,8 @@ config_suspend () {
 
 config_initpacks () {
     ln -sf /proc/self/mounts /etc/mtab
-    apt-get update --yes
-    apt-get dist-upgrade --yes
+    apt-get --yes update
+    apt-get --yes dist-upgrade
     ( echo "locales locales/locales_to_be_generated multiselect en_IE.UTF-8 UTF-8, en_US.UTF-8 UTF-8, nl_NL.UTF-8 UTF-8" ; \
       echo "locales	locales/default_environment_locale select en_US.UTF-8" ; \
       echo "tzdata tzdata/Areas        select Europe" ; \
@@ -155,17 +188,14 @@ config_initpacks () {
       echo "keyboard-configuration keyboard-configuration/layoutcode string us" ; \
       echo "keyboard-configuration keyboard-configuration/variant    select English (US)" ; \
       ) | debconf-set-selections -v
-    apt-get install --yes locales console-setup initramfs-tools
-    if [ "${DISTRO}" == debian ] || [ "${DISTRO}" == proxmox ] ; then
-        dpkg-reconfigure locales tzdata keyboard-configuration console-setup -f noninteractive
-        if [ "${DISTRO}" == proxmox ] ; then
-            apt-get install --yes proxmox-kernel-helper systemd-boot
-        fi
-    elif [ "${DISTRO}" == ubuntu ] ; then
-        dpkg-reconfigure locales tzdata keyboard-configuration console-setup
-    fi
-    
-}
+    cp -f /etc/locale.gen /etc/locale.gen.bak
+    cat /etc/locale.gen.bak | \
+        sed \
+            -e s:"# en_IE.UTF-8":"en_IE.UTF-8":g \
+            -e s:"# en_US.UTF-8":"en_US.UTF-8":g \
+            -e s:"# nl_NL.UTF-8":"nl_NL.UTF-8":g \
+            > /etc/locale.gen
+ }
 
 unpack_distro () {
     debootstrap ${VERSNAME} ${ROOTDIR}

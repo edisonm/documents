@@ -322,14 +322,12 @@ config_fstab_srv () {
 }
 
 do_chroot_pxe () {
-    config_initpacks
-    apt-get install --yes nfs-common fuse lsof bind9-host
+    config_instpacks nfs-common fuse lsof bind9-host
     # apt-get --yes purge connman
     # apt-get --yes autoremove
     config_suspend
-    config_init
-    apt update
-    apt --yes full-upgrade
+    apt-get --yes update
+    apt-get --yes full-upgrade
     update-initramfs -c -k all
 }
 
