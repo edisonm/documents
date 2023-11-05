@@ -11,27 +11,27 @@
 # Machine specific configuration:
 USERNAME=admin
 FULLNAME="Administrative Account"
-DESTNAME=ubuntu1
+DESTNAME=debian1
 
 # Distributon.
-# DISTRO=debian
-DISTRO=ubuntu
+DISTRO=debian
+# DISTRO=ubuntu
 
 # Debian versions
 # VERSNAME=bullseye
-# VERSNAME=bookworm
+VERSNAME=bookworm
 
 # Ubuntu versions
 # VERSNAME=focal
-VERSNAME=jammy
+# VERSNAME=jammy
 
 # Specifies wether you want to install the full proxmox or only the kernel plus
 # the boot utils.  Note: you must choose PROXMOX=boot if you want to use zfs.
 # Leave it emtpy to skip proxmox installation.
 
-PROXMOX=
+# PROXMOX=
 # PROXMOX=full
-# PROXMOX=boot
+PROXMOX=boot
 
 # APT Cache Server, leave it empty to disable:
 APTCACHER=10.8.0.1
@@ -54,7 +54,9 @@ DEBPACKS="acl binutils build-essential openssh-server"
 # DEBPACKS+=" acpid alsa-utils anacron fcitx libreoffice"
 
 # Disk layout:
-DISKLAYOUT=singboot
+# DISKLAYOUT=singboot
+DISKLAYOUT=raid0
+# DISKLAYOUT=raid1
 # DISKLAYOUT=raid10
 
 # Start at 3, similar to singboot without redefined bios and uefi partitons
@@ -94,23 +96,17 @@ ROOTFS=zfs
 SWAPSIZE=-8G
 # SWAPSIZE=-16G
 
-# Unit where you will install Debian, valid for those uni-disk layouts:
-# DISK=/dev/mmcblk0
-# DISK=/dev/nvme0n1
-DISK=/dev/vda
-# DISK=/dev/sda
-# DISK=/dev/sdb
-
+# Unit(s) where you will install Debian
+# DISKS=/dev/mmcblk0
+# DISKS=/dev/nvme0n1
+# DISKS=/dev/vda
+# DISKS=/dev/sda
+# DISKS=/dev/sdb
+# Units for raid1/raid0:
+DISKS="/dev/vda /dev/vdb"
 # Units for raid10:
-# DISK1=/dev/sda
-# DISK2=/dev/sdb
-# DISK3=/dev/sdc
-# DISK4=/dev/sdd
-
-DISK1=/dev/vda
-DISK2=/dev/vdb
-DISK3=/dev/vdc
-DISK4=/dev/vdd
+# DISKS="/dev/sda /dev/sdb /dev/sdc /dev/sdd"
+# DISKS="/dev/vda /dev/vdb /dev/vdc /dev/vdd"
 
 # Enable if you are attempting to continue an incomplete installation
 # RESUMING=yes
@@ -273,23 +269,34 @@ psep () {
     fi
 }
 
-setenv_singdual_swap () {
-    SWAPPDEV=${DISK}${PSEP}${SWAPSUFF}
-    SWAPPDEVS=${SWAPPDEV}
+if_raid () {
+    if [ "${DISKLAYOUT}" == raid1 ] || [ "${DISKLAYOUT}" == raid10 ] ; then
+        $*
+    fi
 }
 
-setenv_singdual () {
-    PSEP=`psep ${DISK}`
-    UEFIPART=${DISK}${PSEP}${UEFISUFF}
-    BOOTPART=${DISK}${PSEP}${BOOTSUFF}
-    ROOTPDEV=${DISK}${PSEP}${ROOTSUFF}
+setenv_commdual () {
+    UEFIPARTS=""
+    BOOTPARTS=""
+    ROOTPDEVS=""
+    for DISK in ${DISKS} ; do
+        PSEP=`psep $DISK`
+        # Pick one, later you can sync the other copies
+        UEFIPART="${DISK}${PSEP}${UEFISUFF}"
+        BOOTPART="${DISK}${PSEP}${BOOTSUFF}"
+        ROOTPDEV="${DISK}${PSEP}${ROOTSUFF}"
+        UEFIPARTS+=" ${UEFIPART}"
+        BOOTPARTS+=" ${BOOTPART}"
+        ROOTPDEVS+=" ${ROOTPDEV}"
+    done
 
-    UEFIPARTS=${UEFIPART}
-    BOOTPARTS=${BOOTPART}
-    ROOTPDEVS=${ROOTPDEV}
+    if_raid \
+        if_bootpart \
+        if_boot_ext4 \
+        setenv_bootext4
 
     if_swappart \
-        setenv_singdual_swap
+        setenv_swap
 }
 
 inc_count () {
@@ -340,15 +347,6 @@ set_swap_suff () {
     if_swappart swap_suff
     if_swappart inc_count
 }
-setenv_singboot () {
-    COUNT=1
-    set_bios_suff
-    set_uefi_suff
-    set_boot_suff
-    set_root_suff
-    set_swap_suff
-    setenv_singdual
-}
 
 setenv_dualboot () {
     COUNT=1
@@ -358,7 +356,7 @@ setenv_dualboot () {
     set_boot_suff
     set_root_suff
     set_swap_suff
-    setenv_singdual
+    setenv_commdual
 }
 
 setenv_dualboot4 () {
@@ -368,13 +366,7 @@ setenv_dualboot4 () {
     set_boot_suff
     set_root_suff
     set_swap_suff
-    setenv_singdual
-}
-
-if_raid10 () {
-    if [ "${DISKLAYOUT}" = raid10 ] ; then
-        $*
-    fi
+    setenv_commdual
 }
 
 if_boot_ext4 () {
@@ -393,55 +385,40 @@ setenv_bootext4 () {
     BOOTDISK=/dev/md0
     SUFFMD=1
     BOOTPART=${BOOTDISK}`psep ${BOOTDISK}`${SUFFMD}
+    BOOTPARTS=${BOOTPART}
 }
 
-setenv_bootbtrfs () {
-    BOOTPART=${BOOTPART1}
+setenv_swap () {
+    SWAPPDEVS=""
+    for DISK in ${DISKS} ; do
+        SWAPPDEVS+=" ${DISK}`psep ${DISK}`${SWAPSUFF}"
+    done
 }
 
-setenv_raid10_swap () {
-    SWAPPDEV1=${DISK1}${PSEP1}${SWAPSUFF}
-    SWAPPDEV2=${DISK2}${PSEP2}${SWAPSUFF}
-    SWAPPDEV3=${DISK3}${PSEP3}${SWAPSUFF}
-    SWAPPDEV4=${DISK4}${PSEP4}${SWAPSUFF}
-    SWAPPDEVS="${SWAPPDEV1} ${SWAPPDEV2} ${SWAPPDEV3} ${SWAPPDEV4}"
-}
-
-setenv_raid10 () {
+setenv_common () {
     COUNT=1
     set_bios_suff
     set_uefi_suff
     set_boot_suff
     set_root_suff
     set_swap_suff
-    
-    # Pick one, later you can sync the other copies
-    UEFIPART=${DISK1}${PSEP}${UEFISUFF}
+    setenv_commdual
+}
 
-    PSEP1=`psep $DISK1`
-    PSEP2=`psep $DISK2`
-    PSEP3=`psep $DISK3`
-    PSEP4=`psep $DISK4`
-    
-    BOOTPART1=${DISK1}${PSEP1}${BOOTSUFF}
-    BOOTPART2=${DISK2}${PSEP2}${BOOTSUFF}
-    BOOTPART3=${DISK3}${PSEP3}${BOOTSUFF}
-    BOOTPART4=${DISK4}${PSEP4}${BOOTSUFF}
+setenv_singboot () {
+    setenv_common
+}
 
-    if_boot_ext4  setenv_bootext4
-    if_boot_btrfs setenv_bootbtrfs
-    
-    ROOTPDEV1=${DISK1}${PSEP1}${ROOTSUFF}
-    ROOTPDEV2=${DISK2}${PSEP2}${ROOTSUFF}
-    ROOTPDEV3=${DISK3}${PSEP3}${ROOTSUFF}
-    ROOTPDEV4=${DISK4}${PSEP4}${ROOTSUFF}
-    
-    UEFIPARTS="${UEFIPART1} ${UEFIPART2} ${UEFIPART3} ${UEFIPART4}"
-    BOOTPARTS="${BOOTPART1} ${BOOTPART2} ${BOOTPART3} ${BOOTPART4}"
-    ROOTPDEVS="${ROOTPDEV1} ${ROOTPDEV2} ${ROOTPDEV3} ${ROOTPDEV4}"
+setenv_raid0 () {
+    setenv_common
+}
 
-    if_swappart \
-        setenv_raid10_swap
+setenv_raid1 () {
+    setenv_common
+}
+
+setenv_raid10 () {
+    setenv_common
 }
 
 setenv_${DISKLAYOUT}
@@ -496,78 +473,93 @@ num_args () {
 
 ROOTPART="`first ${ROOTPARTS}`"
 
-partitions_singboot () {
-    if [ "${WIPEOUT}" == yes ] ; then
-        # First, wipeout the disk:
-        skip_if_resuming sgdisk -o $DISK
-    fi
-    make_biosuefipar $DISK
-    make_partitions $DISK
+create_partitions_singboot () {
+    create_partitions_common
 }
 
-partitions_dualboot () {
-    make_partitions ${DISK}
+create_partitions_dualboot () {
+    for DISK in ${DISKS} ; do
+        make_partitions ${DISK}
+    done
 }
 
-partitions_dualboot4 () {
-    make_partitions ${DISK}
+create_partitions_dualboot4 () {
+    for DISK in ${DISKS} ; do
+        make_partitions ${DISK}
+    done
 }
 
-do_reopen_raid10_partitions () {
+reopen_partitions_raid () {
     mdadm --stop --scan
     sleep 1
-    mdadm --assemble ${BOOTDISK} $BOOTPARTS
+    mdadm --assemble ${BOOTDISK} ${BOOTPARTS}
 }
 
-reopen_raid10_partitions () {
-    if_bootpart \
+reopen_partitions () {
+    if_raid \
+        if_bootpart \
         if_boot_ext4 \
-        do_reopen_raid10_partitions
+        reopen_partitions_raid
 }
 
-partitions_raid10 () {
-    if_else_resuming \
-        reopen_raid10_partitions \
-        create_raid10_partitions
+num_elems () {
+    NUM_ELEMS=0
+    for DISK in ${DISKS} ; do
+        NUM_ELEMS=$((${NUM_ELEMS}+1))
+    done
 }
 
 do_bootparts () {
+    LEVEL=$1
+    shift
+    NDEVS=`num_elems ${DISKS}`
     mdadm --stop --scan
     for part in $* ; do
         mdadm --zero-superblock $part || true
     done
     partprobe
     sleep 1
-    mdadm --create ${BOOTDISK} --level raid1 --metadata=1.0 --raid-devices 4 --force $*
+    mdadm --create ${BOOTDISK} --level ${LEVEL} --metadata=1.0 --raid-devices ${NDEVS} --force $*
     sgdisk -n1:0:0 -t1:8300 ${BOOTDISK}
 }
 
-create_raid10_partitions () {
-
-    if_bootpart \
-        if_boot_ext4 \
-        mdadm --stop --scan
-    
-    sgdisk -o $DISK1
-    sgdisk -o $DISK2
-    sgdisk -o $DISK3
-    sgdisk -o $DISK4
+create_partitions_common () {
+    if [ "${WIPEOUT}" == yes ] ; then
+        # First, wipeout the disks:
+        for DISK in ${DISKS} ; do
+            skip_if_resuming sgdisk -o $DISK
+        done
+    fi
 
     partprobe
 
-    do_make_biosuefipar $DISK1
-    do_make_biosuefipar $DISK2
-    do_make_biosuefipar $DISK3
-    do_make_biosuefipar $DISK4
+    for DISK in ${DISKS} ; do
+        make_biosuefipar $DISK
+        make_partitions $DISK
+    done
+}
 
-    do_make_partitions $DISK1
-    do_make_partitions $DISK2
-    do_make_partitions $DISK3
-    do_make_partitions $DISK4
-
+create_partitions_raid () {
     if_bootpart \
         if_boot_ext4 \
-        do_bootparts $BOOTPARTS
+        mdadm --stop --scan
+
+    create_partitions_common
+    if_bootpart \
+        if_boot_ext4 \
+        do_bootparts ${DISKLAYOUT} ${BOOTPARTS}
+}
+
+create_partitions_raid1 () {
+    create_partitions_raid
+}
+
+create_partitions_raid0 () {
+    create_partitions_raid
+}
+
+create_partitions_raid10 () {
+    create_partitions_raid
 }
 
 open_rootpart () {
@@ -617,9 +609,36 @@ build_bootpart_btrfs () {
 }
 
 build_bootpart_ext4 () {
-    mkfs.ext4 ${FORCEEXT4} -L boot ${BOOTPART}
+    mkfs.ext4 ${FORCEEXT4} -L boot ${BOOTPARTS}
     mount_bpartitions_ext4
 }
+
+zfs_layout () {
+    if [ "${DISKLAYOUT}" == raid1 ] ; then
+        echo mirror $*
+    elif [ "${DISKLAYOUT}" == raid10 ] ; then
+        zfs_raid10_layout $*
+    else
+        echo $*
+    fi
+}
+
+zfs_raid10_layout () {
+    N=0
+    for ELEM in $* ; do
+        if [ "$((${N}%2))" == 0 ] ; then
+            echo mirror
+        fi
+        echo ${ELEM}
+        N=$((${N}+1))
+    done
+}
+
+if [ "$WIPEOUT" == yes ] ; then
+    FORCEEXT4="-F"
+    FORCEZFS="-f"
+    FORCBTRFS="-f"
+fi
 
 build_bootpart_zfs () {
     zpool create ${FORCEZFS} \
@@ -633,7 +652,7 @@ build_bootpart_zfs () {
           -O normalization=formD \
           -O relatime=on \
           -O canmount=off -O mountpoint=/boot -R ${ROOTDIR} \
-          bpool ${BOOTPART}
+          bpool `zfs_layout ${BOOTPARTS}`
     zfs create -o canmount=off -o mountpoint=none bpool/BOOT
     zfs create -o mountpoint=/boot bpool/BOOT/${DESTNAME}
 }
@@ -664,7 +683,7 @@ build_rootpart_zfs () {
           -O normalization=formD \
           -O relatime=on \
           -O canmount=off -O mountpoint=none -R ${ROOTDIR} \
-          rpool ${ROOTPART}
+          rpool `zfs_layout ${ROOTPARTS}`
     
     zfs create -o canmount=off -o mountpoint=none rpool/ROOT
     zfs create -o canmount=on  -o mountpoint=/    rpool/ROOT/${DESTNAME}
@@ -675,23 +694,24 @@ build_rootpart_zfs () {
     zfs create                                    rpool/ROOT/${DESTNAME}/var/lib
     zfs create                                    rpool/ROOT/${DESTNAME}/var/lib/apt
     zfs create                                    rpool/ROOT/${DESTNAME}/var/lib/dpkg
+    zfs create                                    rpool/ROOT/${DESTNAME}/var/lib/AccountsService
+    zfs create                                    rpool/ROOT/${DESTNAME}/var/lib/NetworkManager
     zfs create                                    rpool/ROOT/${DESTNAME}/var/log
     zfs create                                    rpool/ROOT/${DESTNAME}/var/spool
+    if [ "${DISTRO}" == ubuntu ] ; then
+        zfs create                                rpool/ROOT/${DESTNAME}/var/snap
+    fi
     skip_if_bootpart zfs create                   rpool/ROOT/${DESTNAME}/boot
+}
+
+set_btrfs_opts () {
+    MKFSBTRFS="-m ${DISKLAYOUT} -d ${DISKLAYOUT}"
 }
 
 build_partitions () {
 
-    if [ "$WIPEOUT" == yes ] ; then
-        FORCEEXT4="-F"
-        FORCEZFS="-f"
-        FORCBTRFS="-f"
-    fi
-
-    if [ "$DISKLAYOUT" = raid10 ] ; then
-        MKFSBTRFS="-m raid10 -d raid10"
-    fi
-
+    if_raid set_btrfs_opts
+    
     build_rootpart_${ROOTFS}
 
     if_bootpart \
@@ -1359,12 +1379,14 @@ run_chroot () {
 show_settings () {
     echo TPMVERSION=${TPMVERSION}
     echo ENCRYPT=${ENCRYPT}
-    echo DISK=${DISK}
+    echo DISKS=${DISKS}
     echo BIOSSUFF=${BIOSSUFF}
     echo UEFISUFF=${UEFISUFF}
     echo BOOTSUFF=${BOOTSUFF}
     echo ROOTSUFF=${ROOTSUFF}
     echo SWAPSUFF=${SWAPSUFF}
+    echo BOOTPARTS=${BOOTPARTS}
+    echo ROOTPDEVS=${ROOTPDEVS}
     echo ROOTPARTS=${ROOTPARTS}
     echo "Boot Mode: "`if_else_uefi "echo UEFI" "echo BIOS"`
 }
@@ -1393,7 +1415,7 @@ chroot_install () {
     config_instpacks
     if_bootpart \
         if_boot_ext4 \
-        if_raid10 \
+        if_raid \
         apt-get install --yes mdadm
     config_fstab
     inspkg_encryption
@@ -1448,7 +1470,9 @@ prepare_partitions () {
         set_key
     config_aptcacher
     setup_aptinstall
-    partitions_${DISKLAYOUT}
+    if_else_resuming \
+        reopen_partitions \
+        create_partitions_${DISKLAYOUT}
     skip_if_resuming \
         crypt_partitions
     open_partitions

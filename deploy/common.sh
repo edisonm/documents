@@ -144,7 +144,7 @@ config_instpacks_zfs () {
 
 config_instpacks () {
     config_initpacks
-    apt-get install --yes locales console-setup initramfs-tools
+    apt-get --yes install initramfs-tools
     config_reconfig_${DISTRO}
     INIPACKS="$*"
     if [ "$(dmidecode -s system-manufacturer)" == "QEMU" ] ; then
@@ -179,6 +179,7 @@ config_initpacks () {
     ln -sf /proc/self/mounts /etc/mtab
     apt-get --yes update
     apt-get --yes dist-upgrade
+    apt-get --yes install locales console-setup
     ( echo "locales locales/locales_to_be_generated multiselect en_IE.UTF-8 UTF-8, en_US.UTF-8 UTF-8, nl_NL.UTF-8 UTF-8" ; \
       echo "locales	locales/default_environment_locale select en_US.UTF-8" ; \
       echo "tzdata tzdata/Areas        select Europe" ; \
