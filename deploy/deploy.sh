@@ -38,6 +38,10 @@ APTCACHER=10.8.0.1
 
 # Specifies if the machine is encrypted:
 ENCRYPT=yes
+
+# Enable compression
+COMPRESSION=yes
+
 # TANG Server, leave it empty to disable:
 # TANGSERV=10.8.0.2
 # Use TPM, if available.  Leave empty for no tpm
@@ -640,6 +644,11 @@ if [ "$WIPEOUT" == yes ] ; then
     FORCBTRFS="-f"
 fi
 
+if [ "${COMPRESSION}" == yes ] ; then
+    COMPZFS="-O compression=on"
+    COMPBTRFS="compress,"
+fi
+
 build_bootpart_zfs () {
     zpool create ${FORCEZFS} \
           -o ashift=12 \
@@ -648,7 +657,7 @@ build_bootpart_zfs () {
           -o cachefile=/etc/zfs/zpool.cache \
           -O devices=off \
           -O acltype=posixacl -O xattr=sa \
-          -O compression=on \
+          ${COMPZFS} \
           -O normalization=formD \
           -O relatime=on \
           -O canmount=off -O mountpoint=/boot -R ${ROOTDIR} \
@@ -679,7 +688,7 @@ build_rootpart_zfs () {
           -o ashift=12 \
           -o autotrim=on \
           -O acltype=posixacl -O xattr=sa -O dnodesize=auto \
-          -O compression=lz4 \
+          ${COMPZFS} \
           -O normalization=formD \
           -O relatime=on \
           -O canmount=off -O mountpoint=none -R ${ROOTDIR} \
@@ -932,8 +941,8 @@ dump_fstab () {
     fi
 
     if [ ${ROOTFS} == "btrfs" ] ; then
-        echo "$ROOTDEV /         btrfs     subvol=@,defaults,noatime,compress,space_cache=v2,autodefrag 0 1"
-        echo "$ROOTDEV /home     btrfs subvol=@home,defaults,noatime,compress,space_cache=v2,autodefrag 0 2"
+        echo "$ROOTDEV /         btrfs     subvol=@,defaults,noatime,${COMPBTRFS}space_cache=v2,autodefrag 0 1"
+        echo "$ROOTDEV /home     btrfs subvol=@home,defaults,noatime,${COMPBTRFS}space_cache=v2,autodefrag 0 2"
     elif  [ ${ROOTFS} == "ext4" ] ; then
         echo "$ROOTDEV /         ext4     defaults,noatime 0 1"
     fi
