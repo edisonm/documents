@@ -11,7 +11,7 @@
 # Machine specific configuration:
 USERNAME=admin
 FULLNAME="Administrative Account"
-DESTNAME=debian1
+DESTNAME=mntedison
 
 # Distributon.
 DISTRO=debian
@@ -34,10 +34,10 @@ VERSNAME=bookworm
 PROXMOX=boot
 
 # APT Cache Server, leave it empty to disable:
-APTCACHER=10.8.0.1
+# APTCACHER=10.8.0.1
 
 # Specifies if the machine is encrypted:
-ENCRYPT=yes
+# ENCRYPT=yes
 
 # Enable compression
 COMPRESSION=yes
@@ -50,16 +50,16 @@ TPMVERSION=`if [ -f ${TPMVERFILE} ] ; then cat ${TPMVERFILE} ; fi`
 
 # Extra packages you want to install, leave empty for a small footprint
 DEBPACKS="acl binutils build-essential openssh-server"
-# DEBPACKS+=" emacs firefox-esr"
+DEBPACKS+=" emacs firefox-esr"
 # Equivalent to live xfce4 installation + some tools
-# DEBPACKS+=" xfce4 task-xfce-desktop"
+DEBPACKS+=" xfce4 task-xfce-desktop" 
 # DEBPACKS+=" lxde task-lxde-desktop"
 # DEBPACKS+=" cinnamon task-cinnamon-desktop"
 # DEBPACKS+=" acpid alsa-utils anacron fcitx libreoffice"
 
 # Disk layout:
-# DISKLAYOUT=singboot
-DISKLAYOUT=raid0
+DISKLAYOUT=singboot
+# DISKLAYOUT=raid0
 # DISKLAYOUT=raid1
 # DISKLAYOUT=raid10
 
@@ -73,41 +73,43 @@ DISKLAYOUT=raid0
 # overwrite partitions will cause a failure.
 WIPEOUT=yes
 
-# UEFI partition size. It is going to be created if the system supports UEFI,
-# otherwise will be ignored and a 1k bios_grub partition will be created.
+# UEFI partition size. It is going to be created if the system supports UEFI or
+# you are going to use the proxmox boot tool (PROXMOX=boot), otherwise will be
+# ignored and a 1k bios_grub partition will be created.
 UEFISIZE=+1G
 
-# Boot partition size, empty for no separated boot partition.
+# Boot partition size, empty for no separated boot partition. Compulsory if no
+# zfs and the system doesn't support UEFI
 BOOTSIZE=+2G
 
 # boot partition file system to be used
 # BOOTFS=ext4
-# BOOTFS=btrfs
-BOOTFS=zfs
+BOOTFS=btrfs
+# BOOTFS=zfs
 
 # Root partition size, 0 for max available space, minimum ~20GB
-ROOTSIZE=0
+# ROOTSIZE=0
 # ROOTSIZE=+32G
-# ROOTSIZE=+64G
+ROOTSIZE=+64G
 
 # root partition file system to be used
 # BOOTFS=ext4
-# ROOTFS=btrfs
-ROOTFS=zfs
+ROOTFS=btrfs
+# ROOTFS=zfs
 
 # Swap partition size, placed at the end, empty for no swap, it is recommended
 # to be equal to the available RAM memory
-SWAPSIZE=-8G
-# SWAPSIZE=-16G
+# SWAPSIZE=-8G
+SWAPSIZE=-16G
 
 # Unit(s) where you will install Debian
 # DISKS=/dev/mmcblk0
 # DISKS=/dev/nvme0n1
 # DISKS=/dev/vda
-# DISKS=/dev/sda
+DISKS=/dev/sda
 # DISKS=/dev/sdb
 # Units for raid1/raid0:
-DISKS="/dev/vda /dev/vdb"
+# DISKS="/dev/vda /dev/vdb"
 # Units for raid10:
 # DISKS="/dev/sda /dev/sdb /dev/sdc /dev/sdd"
 # DISKS="/dev/vda /dev/vdb /dev/vdc /dev/vdd"
@@ -183,7 +185,7 @@ do_make_biosuefipar () {
     # we can switch without resizing partitions (which is a headache):
     skip_if_uefi \
         make_biospar $*
-    if_uefi \
+    if_uefipar \
         make_uefipar $*
 }
 
@@ -231,6 +233,12 @@ if_else_proxmox () {
 
 skip_if_bootfs_zfs () {
     if [ "${BOOTFS}" != "zfs" ] ; then
+        $*
+    fi
+}
+
+if_uefipar () {
+    if [ -d /sys/firmware/efi ] || [ "${PROXMOX}" != "" ] ; then
         $*
     fi
 }
@@ -321,8 +329,8 @@ uefi_suff () {
 }
 
 set_uefi_suff () {
-    if_uefi uefi_suff
-    if_uefi inc_count
+    if_uefipar uefi_suff
+    if_uefipar inc_count
 }
 
 boot_suff () {
@@ -536,7 +544,7 @@ create_partitions_common () {
     fi
 
     partprobe
-
+    sleep 1
     for DISK in ${DISKS} ; do
         make_biosuefipar $DISK
         make_partitions $DISK
@@ -650,11 +658,29 @@ if [ "${COMPRESSION}" == yes ] ; then
 fi
 
 build_bootpart_zfs () {
+    if [ "${VERSNAME}" == bullseye ] ; then
+        ZFSOPTS="\
+        -o feature@async_destroy=enabled \
+        -o feature@bookmarks=enabled \
+        -o feature@embedded_data=enabled \
+        -o feature@empty_bpobj=enabled \
+        -o feature@enabled_txg=enabled \
+        -o feature@extensible_dataset=enabled \
+        -o feature@filesystem_limits=enabled \
+        -o feature@hole_birth=enabled \
+        -o feature@large_blocks=enabled \
+        -o feature@livelist=enabled \
+        -o feature@lz4_compress=enabled \
+        -o feature@spacemap_histogram=enabled \
+        -o feature@zpool_checkpoint=enabled"
+    else
+        ZFSOPTS="-o compatibility=grub2"
+    fi
     zpool create ${FORCEZFS} \
           -o ashift=12 \
           -o autotrim=on \
-          -o compatibility=grub2 \
           -o cachefile=/etc/zfs/zpool.cache \
+          ${ZFSOPTS} \
           -O devices=off \
           -O acltype=posixacl -O xattr=sa \
           ${COMPZFS} \
@@ -745,8 +771,15 @@ encrypt_partitions () {
 }
 
 setup_aptinstall () {
+    setup_nonfree
     if [ "${DISTRO}" != ubuntu ] ; then
-        echo "deb http://deb.debian.org/debian ${VERSNAME} main contrib non-free-firmware" > /etc/apt/sources.list
+        cat <<'EOF' | sed -e s:'<VERSNAME>':"${VERSNAME}":g \
+                          -e s:'<NONFREE>':"${NONFREE}":g \
+                          > /etc/apt/sources.list
+deb http://deb.debian.org/debian/ <VERSNAME> main contrib <NONFREE>
+deb-src http://deb.debian.org/debian/ <VERSNAME> main contrib <NONFREE>
+# deb [trusted=yes] file:/run/live/medium bookwork main <NONFREE>
+EOF
     fi
     # echo "deb http://deb.debian.org/debian ${VERSNAME}-backports main contrib" >> /etc/apt/sources.list
     apt-get update --yes
@@ -786,7 +819,8 @@ mount_uefi () {
 }
 
 mount_bpartitions () {
-    if_bootpart mount ${BOOTPART} ${ROOTDIR}/boot
+    mkdir -p ${ROOTDIR}/boot
+    mount ${BOOTPART} ${ROOTDIR}/boot
 }
 
 mount_epartitions () {
@@ -1402,7 +1436,11 @@ show_settings () {
 
 update_boot_proxmox () {
     echo "boot=zfs root=ZFS=rpool/ROOT/${DESTNAME} rw" > /etc/kernel/cmdline
-    rm -f /etc/kernel/proxmox-boot-uuids
+    if [ "${VERSNAME}" == bullseye ] ; then
+        rm -f /etc/kernel/proxmox-boot-uuids
+    else
+        proxmox-boot-tool clean # this will fail in bullseye
+    fi
     proxmox-boot-tool init ${UEFIPART}
 }
 
@@ -1463,6 +1501,7 @@ fix_tpm () {
 }
 
 check_prereq () {
+    apt update
     apt install --yes mokutil
     if [ "`mokutil --sb-state`" == "SecureBoot enabled" ] && [ "${DISTRO}" != ubuntu ] ; then
         echo "ERROR: Installing a zfs file system with SecureBoot enabled is not supported"
@@ -1488,12 +1527,6 @@ prepare_partitions () {
     if_else_resuming \
         mount_partitions \
         build_partitions
-}
-
-if_zfs () {
-    if [ "${ROOTFS}" == zfs ] || [ "${BOOTFS}" == zfs ] ; then
-        $*
-    fi
 }
 
 cp_zpool_cache () {
@@ -1538,8 +1571,7 @@ install () {
         encrypt_partitions
     bind_dirs
     config_chroot
-    if_zfs \
-        cp_zpool_cache
+    if_zfs cp_zpool_cache
     if_zfs \
         if_bootpart \
         setup_zfs_bpool
@@ -1554,7 +1586,6 @@ rescue () {
     ask_key
     config_aptcacher
     setup_aptinstall
-    partitions_${DISKLAYOUT}
     open_partitions
     mount_partitions
     bind_dirs

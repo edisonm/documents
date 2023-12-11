@@ -50,12 +50,16 @@ config_aptcacher () {
     fi
 }
 
-setup_apt () {
+setup_nonfree () {
     if [ "${VERSNAME}" == "bookworm" ] ; then
         NONFREE="non-free-firmware"
     else
         NONFREE="non-free"
     fi
+}
+
+setup_apt () {
+    setup_nonfree
     setup_apt_${DISTRO}
 }
 
@@ -103,7 +107,12 @@ setup_apt_proxmox () {
                       > ${ROOTDIR}/etc/apt/sources.list.d/${VERSNAME}-pve-install-repo.list
 deb [arch=amd64] http://download.proxmox.com/debian/pve <VERSNAME> pve-no-subscription
 EOF
-    wget https://enterprise.proxmox.com/debian/proxmox-release-bookworm.gpg -O ${ROOTDIR}/etc/apt/trusted.gpg.d/proxmox-release-bookworm.gpg
+    # proactively create pve-enterprise.list, with such repository disabled
+    cat <<'EOF' | sed -e s:'<VERSNAME>':"${VERSNAME}":g \
+                      > ${ROOTDIR}/etc/apt/sources.list.d/pve-enterprise.list
+# deb https://enterprise.proxmox.com/debian/pve <VERSNAME> pve-enterprise
+EOF
+    wget https://enterprise.proxmox.com/debian/proxmox-release-${VERSNAME}.gpg -O ${ROOTDIR}/etc/apt/trusted.gpg.d/proxmox-release-${VERSNAME}.gpg
 }
 
 config_admin () {
@@ -111,6 +120,14 @@ config_admin () {
     usermod -aG sudo $USERNAME
     chown -R $USERNAME:$USERNAME /home/$USERNAME
     # printf "%s\n%s\n" "$KEY_" "$KEY_" | passwd root
+}
+
+if_else_proxmox () {
+    if [ "${PROXMOX}" != "" ] ; then
+        $1
+    else
+        $2
+    fi
 }
 
 config_instpacks_debian () {
@@ -126,7 +143,10 @@ config_instpacks_proxmox_full () {
 }
 
 config_instpacks_proxmox () {
-    INIPACKS+=" pve-kernel-6.2 proxmox-kernel-helper systemd-boot"
+    if [ "${VERSNAME}" != bookworm ] ; then
+        INITPACKS+=" systemd-boot"
+    fi
+    INIPACKS+=" pve-kernel-6.2 proxmox-kernel-helper"
     config_instpacks_proxmox_${PROXMOX}
 }
 
@@ -140,6 +160,12 @@ config_reconfig_ubuntu () {
 
 config_instpacks_zfs () {
     INIPACKS+=" zfsutils-linux zfs-initramfs"
+}
+
+if_zfs () {
+    if [ "${ROOTFS}" == zfs ] || [ "${BOOTFS}" == zfs ] ; then
+        $*
+    fi
 }
 
 config_instpacks () {
