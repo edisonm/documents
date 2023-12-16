@@ -146,7 +146,7 @@ config_instpacks_proxmox () {
     if [ "${VERSNAME}" != bookworm ] ; then
         INITPACKS+=" systemd-boot"
     fi
-    INIPACKS+=" pve-kernel-6.2 proxmox-kernel-helper"
+    INIPACKS+=" proxmox-kernel-6.5 proxmox-kernel-helper"
     config_instpacks_proxmox_${PROXMOX}
 }
 
@@ -177,10 +177,6 @@ config_instpacks () {
         INIPACKS+=" qemu-guest-agent"
     fi
     if_zfs config_instpacks_zfs
-    # os-prober is needed only on dual-boot systems:
-    if [ "${DISKLAYOUT}" != "dualboot" ] && [ "${DISKLAYOUT}" != "dualboot4" ] ; then
-        apt-get remove --yes --purge os-prober
-    fi
     INIPACKS+=" sudo btrfs-progs"
     if [ "$DISTRO" == "debian" ] ; then
         INIPACKS+=" debconf-utils"
@@ -194,10 +190,16 @@ config_instpacks () {
     apt-get install --yes $INIPACKS
     echo "Installing extra packages"
     apt-get install --yes $DEBPACKS
+    # os-prober is needed only on dual-boot systems.
+    # Placed at the end to make sure is uninstalled:
+    if [ "${DISKLAYOUT}" != "dualboot" ] && [ "${DISKLAYOUT}" != "dualboot4" ] ; then
+        apt-get remove --yes --purge os-prober
+    fi
+    chmod a+x /etc/init.d/networking # looks like a bug in the package that install this file
 }
 
 config_suspend () {
-    # 95% I have to disable this, even on non-server machines:
+    # 95% of times I have to disable this, even on non-server machines:
     systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
 }
 

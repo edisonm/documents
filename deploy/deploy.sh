@@ -37,7 +37,7 @@ PROXMOX=boot
 # APTCACHER=10.8.0.1
 
 # Specifies if the machine is encrypted:
-# ENCRYPT=yes
+ENCRYPT=yes
 
 # Enable compression
 COMPRESSION=yes
@@ -47,6 +47,11 @@ COMPRESSION=yes
 # Use TPM, if available.  Leave empty for no tpm
 TPMVERFILE=/sys/class/tpm/tpm0/tpm_version_major
 TPMVERSION=`if [ -f ${TPMVERFILE} ] ; then cat ${TPMVERFILE} ; fi`
+
+# Use Dropbear SSH to provide the password to decrypt the machine
+UNLOCK_SSH=1
+# Copy here the authorized public key to be used to login SSH
+AUTH_KEY=id_rsa.pub
 
 # Extra packages you want to install, leave empty for a small footprint
 DEBPACKS="acl binutils build-essential openssh-server"
@@ -1279,7 +1284,7 @@ config_noresume () {
 }
 
 dump_root_entry () {
-    echo "crypt_root${IDX}            UUID=$(blkid -s UUID -o value ${PDEV}) ${UNLOCKFILE} luks,discard,initramfs${UNLOCKOPTS}"
+    echo "crypt_root${IDX}            UUID=$(blkid -s UUID -o value ${PDEV}) ${UNLOCKFILE} luks,discard${UNLOCKOPTS}"
 }
 
 dump_swap_entry () {
@@ -1289,16 +1294,19 @@ dump_swap_entry () {
 dump_crypttab () {
     if [ "$TANGSERV" != "" ] || [ "$TPMVERSION" == "2" ] ; then
         UNLOCKFILE="/autounlock.key"
-        UNLOCKOPTS=",keyscript=decrypt_clevis"
+        UNLOCKOPTS=",initramfs,keyscript=decrypt_clevis"
     elif [ "$TPMVERSION" == "1" ] ; then
         UNLOCKFILE="/autounlock.key"
-        UNLOCKOPTS=",keyscript=decrypt_tpm"
+        UNLOCKOPTS=",initramfs,keyscript=decrypt_tpm"
+    elif [ "${UNLOCK_SSH}" == "1" ] ; then
+        UNLOCKFILE="none               "
+        UNLOCKOPTS=",initramfs"
     elif [ "`num_args ${ROOTPDEVS}`" != 1 ] ; then
         UNLOCKFILE="root               "
-        UNLOCKOPTS=",keyscript=decrypt_keyctl"
+        UNLOCKOPTS=",initramfs,keyscript=decrypt_keyctl"
     else
         UNLOCKFILE="none               "
-        UNLOCKOPTS=""
+        UNLOCKOPTS=",initramfs"
     fi
     forall_rootpdevs dump_root_entry
     forall_swappdevs dump_swap_entry
@@ -1411,6 +1419,9 @@ config_chroot () {
     export EFI_=$(efibootmgr -q > /dev/null 2>&1 && echo 1 || echo 0)
     if [ "`realpath $0`" != "${DEPLOYDIR}/deploy.sh" ] ; then
         mkdir -p ${DEPLOYDIR}
+        if [ -f "${AUTH_KEY}" ] ; then
+            cp "${AUTH_KEY}" ${DEPLOYDIR}/
+        fi
         cp deploy.sh common.sh ${DEPLOYDIR}/
     fi
 }
@@ -1434,13 +1445,14 @@ show_settings () {
     echo "Boot Mode: "`if_else_uefi "echo UEFI" "echo BIOS"`
 }
 
-update_boot_proxmox () {
+config_kernel_cmdline () {
     echo "boot=zfs root=ZFS=rpool/ROOT/${DESTNAME} rw" > /etc/kernel/cmdline
-    if [ "${VERSNAME}" == bullseye ] ; then
-        rm -f /etc/kernel/proxmox-boot-uuids
-    else
-        proxmox-boot-tool clean # this will fail in bullseye
-    fi
+}
+
+update_boot_proxmox () {
+    if_zfs config_kernel_cmdline
+    rm -f /etc/kernel/proxmox-boot-uuids
+    # proxmox-boot-tool clean # this will fail, don't use during installation
     proxmox-boot-tool init ${UEFIPART}
 }
 
@@ -1452,6 +1464,35 @@ update_boot () {
 
 config_zfs_bpool () {
     systemctl enable zfs-import-bpool.service
+}
+
+inspkg_dropbear () {
+    if [ "${UNLOCK_SSH}" == "1" ] ; then
+        apt-get install --yes dropbear-initramfs || true
+    fi
+}
+
+openssh_to_dropbear () {
+    cp -f /etc/dropbear/initramfs/dropbear_${1}_host_key /etc/dropbear/initramfs/dropbear_${1}_host_key.bak
+    /usr/lib/dropbear/dropbearconvert \
+        openssh dropbear /etc/ssh/ssh_host_${1}_key \
+        /etc/dropbear/initramfs/dropbear_${1}_host_key
+}
+
+config_dropbear () {
+    if [ "${UNLOCK_SSH}" == "1" ] ; then
+        cp -f /etc/dropbear/initramfs/dropbear.conf /etc/dropbear/initramfs/dropbear.conf.bak
+        cat /etc/dropbear/initramfs/dropbear.conf.bak | \
+            sed \
+                -e s:"#DROPBEAR_OPTIONS=.*":'DROPBEAR_OPTIONS="-p 2222 -c cryptroot-unlock"':g \
+                > /etc/dropbear/initramfs/dropbear.conf
+        openssh_to_dropbear rsa
+        openssh_to_dropbear ed25519
+        openssh_to_dropbear ecdsa
+        
+        ( cp -f ${AUTH_KEY} /etc/dropbear/initramfs/authorized_keys && \
+              chmod 0600 /etc/dropbear/initramfs/authorized_keys ) || true
+    fi
 }
 
 chroot_install () {
@@ -1467,6 +1508,8 @@ chroot_install () {
     config_fstab
     inspkg_encryption
     config_encryption
+    inspkg_dropbear
+    config_dropbear
     config_crypttab
     config_noresume
     config_suspend
