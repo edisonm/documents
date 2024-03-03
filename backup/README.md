@@ -1,5 +1,9 @@
 # Cold storage backup tool
 
+- Currently only zpool should be considered stable, since btrfs is not working
+  properly yet, in particular is not possible to reconstruct the backup from a
+  snapshot.
+
 - Copy the directory [backup](backup/) to your backup host
 
 - Create a file called settings_[hostname].sh, where hostname is your backup
