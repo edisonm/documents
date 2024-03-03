@@ -1,7 +1,7 @@
 
 snapshot_zpool () {
     snapshot=${send_pool}${send_zfs}@${snprefix}${currsnap}
-    if [ "`${send_ssh} zfs list -pHt snapshot -o name ${snapshot} 2>/dev/null`" == "" ] ; then
+    if [ "`${send_ssh} zfs list -pHt snapshot -o name ${snapshot} 2>/dev/null`" = "" ] ; then
 	dryer ${send_ssh} zfs snapshot -r ${snapshot}
     fi
 }
@@ -27,7 +27,7 @@ recvsnap0_zpool () {
 zfs_prev_zpool () {
     # currsnap=`$send_ssh zfs list -Ht snapshot -o name ${send_zpoolfs}|sed -e "s:${send_zpoolfs}@::g"|tail -n1`
     send_zpoolfss="`${send_ssh} zfs list -r -Ho name ${send_zpool}${send_zfs}`"
-    if [ "${send_unfold}" != "" ] || ( [ "${prevsnap}" != "" ] && [ `requires_unfold ${prevcmd}` == 1 ] ) ; then
+    if [ "${send_unfold}" != "" ] || ( [ "${prevsnap}" != "" ] && [ `requires_unfold ${prevcmd}` = 1 ] ) ; then
         # echo "Note: unfolding -R since some incrementals are incomplete"
         for send_zpoolfs in ${send_zpoolfss} ; do
             send_zfs=${send_zpoolfs##${send_zpool}}
@@ -97,7 +97,7 @@ source_umount_zpool () {
 
 snapshot_size_zpool () {
     size="`$send_ssh zfs send -nvPc ${sendopts} ${send_zpoolfs}@${snprefix}${currsnap} 2>/dev/null | grep size | awk '{print $2}'`"
-    if [ "${size}" == "" ] ; then
+    if [ "${size}" = "" ] ; then
 	echo 0
     else
 	echo ${size}
@@ -123,7 +123,7 @@ cache_command () {
     command="$1"
     cache_file="$2"
     time_out="$3"
-    if [ -f ${cache_file} ] && [ $(( `date +%s` - `stat -L --format %Y ${cache_file} ` < ${time_out} )) == 1 ] ; then
+    if [ -f ${cache_file} ] && [ $(( `date +%s` - `stat -L --format %Y ${cache_file} ` < ${time_out} )) = 1 ] ; then
         # if [ "`stat -L --format %s ${cached_data}`" = "0" ] ; then
         #     ${command}|tee ${cache_file}
         # else

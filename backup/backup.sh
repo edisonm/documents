@@ -114,7 +114,7 @@ match_backup_snapshot () {
 }
 
 dryer () {
-    if [ "${dryrun}" == 1 ] ; then
+    if [ "${dryrun}" = 1 ] ; then
 	echo $*
     else
 	$*
@@ -122,7 +122,7 @@ dryer () {
 }
 
 dryern () {
-    if [ "${dryrun}" == 1 ] ; then
+    if [ "${dryrun}" = 1 ] ; then
 	echo -n $*
     else
 	$*
@@ -130,7 +130,7 @@ dryern () {
 }
 
 dryerpn () {
-    if [ "${dryrun}" == 1 ] ; then
+    if [ "${dryrun}" = 1 ] ; then
 	cat
 	echo -n " | $*"
     else
@@ -139,7 +139,7 @@ dryerpn () {
 }
 
 dryerp () {
-    if [ "${dryrun}" == 1 ] ; then
+    if [ "${dryrun}" = 1 ] ; then
 	cat
 	echo " | $*"
     else
@@ -215,7 +215,7 @@ media_host_pools () {
 declare -A media_host_pools
 
 forall_recv () {
-    if [ "${recv_pool}" == "" ] || [ "${recv_host}" == "" ] ; then
+    if [ "${recv_pool}" = "" ] || [ "${recv_host}" = "" ] ; then
         media_host_pools[${fstype}]="${media_host_pools[${fstype}]:-`media_host_pools ${fstype}`}"
         for recv_host_pool in ${media_host_pools[${fstype}]} ; do
             recv_host=${recv_host_pool%:*}
@@ -385,7 +385,7 @@ listsnap () {
 prevsnap () {
     prevsnap=""
     for snapshot in `$1` ; do
-        if [ $((${snapshot}<${currsnap})) == 1 ] ; then
+        if [ $((${snapshot}<${currsnap})) = 1 ] ; then
             prevsnap=${snapshot}
         fi
     done
@@ -397,8 +397,8 @@ between () {
     lowersnap=$2
     uppersnap=$3
     for snapshot in ${snapshots} ; do
-        if [ $((${lowersnap}<=${snapshot##${snprefix}})) == 1 ] \
-               && [ $((${snapshot##${snprefix}}<=${uppersnap})) == 1 ] ; then
+        if [ $((${lowersnap}<=${snapshot##${snprefix}})) = 1 ] \
+               && [ $((${snapshot##${snprefix}}<=${uppersnap})) = 1 ] ; then
             echo ${snapshot}
         fi
     done
@@ -408,7 +408,7 @@ fromsnap () {
     snapshots=`$1`
     lowersnap=$2
     for snapshot in ${snapshots} ; do
-        if [ $((${lowersnap##${snprefix}}<=${snapshot##${snprefix}})) == 1 ] ; then
+        if [ $((${lowersnap##${snprefix}}<=${snapshot##${snprefix}})) = 1 ] ; then
             echo ${snapshot}
         fi
     done
@@ -430,7 +430,7 @@ zfs_wrapr () {
     # hasprevs="`${recv_ssh} zfs list -Ho name ${recv_zpoolfs}${send_zfs}@${prevsnap}`"
     # echo hasprevs="`recvsnap|grep "${prevsnap}"`" 1>&2
     # echo prevsnap="${prevsnap}"
-    if [ "${prevsnap}" == "" ] || [ "`recvsnap|grep "${prevsnap}"`" == "" ] ; then
+    if [ "${prevsnap}" = "" ] || [ "`recvsnap|grep "${prevsnap}"`" = "" ] ; then
         action="# first full backup ${currsnap}"
         baktype=full
     else
@@ -446,13 +446,13 @@ requires_unfold () {
     for send_zpoolfs in ${send_zpoolfss} ; do
         case $1 in
             listsnap)
-                if [ "`sendsnap|grep ${prevsnap}`" == "" ] \
-                       || [ "`recvsnap|grep ${prevsnap}`" == "" ] ; then
+                if [ "`sendsnap|grep ${prevsnap}`" = "" ] \
+                       || [ "`recvsnap|grep ${prevsnap}`" = "" ] ; then
                     unfold=1
                 fi
             ;;
             *)
-                if [ "`${1}|grep ${prevsnap}`" == "" ] ; then
+                if [ "`${1}|grep ${prevsnap}`" = "" ] ; then
                     unfold=1
                 fi
             ;;
@@ -604,7 +604,7 @@ statistics () {
         done
         printf "\n"
         echo "ERROR: Data to be copied will not fit on:$recv_err"
-        if [ "${dryrun}" == 0 ] ; then
+        if [ "${dryrun}" = 0 ] ; then
             exit 1
         fi
     fi
@@ -636,7 +636,7 @@ lambda () {
 }
 
 crypt_open () {
-    if [ "`${media_ssh} lsblk -o fstype,uuid|grep crypto_LUKS|awk '{print $2}'|grep ${volume}`" == "${volume}" ] \
+    if [ "`${media_ssh} lsblk -o fstype,uuid|grep crypto_LUKS|awk '{print $2}'|grep ${volume}`" = "${volume}" ] \
            && ! ( ${media_ssh} test -e /dev/mapper/crbackup_${volume} ) ; then
         cat /crypto_keyfile.bin | \
             ${media_ssh} cryptsetup luksOpen UUID=$volume crbackup_${volume} --key-file -
@@ -885,7 +885,7 @@ show_history () {
                  | grep ${curr_snapshot}`" != "" ] ; then
                 volume_stat="X"
                 for dropsnap in ${send_dropsnaps} ${dropsnaps} ; do
-                    if [ "${dropsnap}" == "${curr_snapshot}" ] ; then
+                    if [ "${dropsnap}" = "${curr_snapshot}" ] ; then
                         volume_stat="D"
                     fi
                 done
@@ -901,7 +901,7 @@ show_history () {
             if [ "`cat data/${recv_host}_${recv_pool}.dat|grep "${curr_snapshot}"`" != "" ] ; then
                 volume_stat="X"
                 for dropsnap in ${recv_dropsnaps} ${dropsnaps} ; do
-                    if [ "${dropsnap}" == "${curr_snapshot}" ] ; then
+                    if [ "${dropsnap}" = "${curr_snapshot}" ] ; then
                         volume_stat="D"
                     fi
                 done
@@ -1047,25 +1047,25 @@ smartretp () {
         timestamp="$yy-$mm-$dd $HH:00:00"
         WW=`date -d"${timestamp}" '+%W'`
         age=$((${curr_timestamp}-`date -d"${timestamp}" '+%s'`))
-        if [ $((${age} < 60*60*24)) == 1 ] ; then
+        if [ $((${age} < 60*60*24)) = 1 ] ; then
             if [ "${per_h[${HH}]}" != "" ] ; then
                 echo ${snapshot}
             else
                 per_h[${HH}]=${snapshot}
             fi
-        elif [ $((${age} < 60*60*24*7)) == 1 ] ; then
+        elif [ $((${age} < 60*60*24*7)) = 1 ] ; then
             if [ "${per_d[${dd}]}" != "" ] ; then
                 echo ${snapshot}
             else
                 per_d[${dd}]=${snapshot}
             fi
-        elif [ $((${age} < 60*60*24*31)) == 1 ] ; then
+        elif [ $((${age} < 60*60*24*31)) = 1 ] ; then
             if [ "${per_w[${WW}]}" != "" ] ; then
                 echo ${snapshot}
             else
                 per_w[${WW}]=${snapshot}
             fi
-        elif [ $((${age} < 60*60*24*366)) == 1 ] ; then
+        elif [ $((${age} < 60*60*24*366)) = 1 ] ; then
             if [ "${per_m[${mm}]}" != "" ] ; then
                 echo ${snapshot}
             else
@@ -1141,7 +1141,7 @@ help () {
 }
 
 main () {
-    if [ "$*" == "" ] ; then
+    if [ "$*" = "" ] ; then
         dryrun all
     else
 	$*
