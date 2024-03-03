@@ -5,7 +5,7 @@ set -e
 #   Script for automated backups via zfs and btrfs
 
 #   Author:        Edison Mera
-#   E-mail:        efmera@gmail.com
+#   E-mail:        mail@edisonm.com
 #   Copyright (C):  2021, Process  Design Center,  Breda, The  Netherlands.  All
 #   rights reserved.
 
