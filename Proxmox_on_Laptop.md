@@ -3,7 +3,7 @@
 While some tutorials out there are more focused on reusing old laptops as
 servers, this is more for people like me who want to use Proxmox as a Desktop
 Virtualization in a Mobile Workstation, in my case, I use it to test
-it-infrastructure that later can be deployed in production machines.
+IT-infrastructure that later can be deployed in production machines.
 
 Follow the [official installation
 instructions](https://pve.proxmox.com/wiki/Install_Proxmox_VE_on_Debian_12_Bookworm),

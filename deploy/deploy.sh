@@ -31,7 +31,7 @@ VERSNAME=bookworm
 
 # PROXMOX=
 # PROXMOX=full
-PROXMOX=boot
+PROXMOX=full
 
 # APT Cache Server, leave it empty to disable:
 # APTCACHER=10.8.0.1
