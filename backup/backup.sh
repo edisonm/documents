@@ -206,14 +206,14 @@ forall_backjobs () {
     done < <(list_backjobs)
 }
 
-media_host_pool () {
-    echo ${mediahost}:${media_pool}
+set_media_host_pool () {
+    media_host_pools[${fstype}]=${mediahost}:${media_pool}
 }
 
-media_host_pools () {
+set_media_host_pools () {
     forall_mediahosts \
         forall_medias \
-        media_host_pool
+        set_media_host_pool
 }
 
 declare -A media_host_pools
@@ -227,7 +227,9 @@ set_avail_ssh () {
 
 forall_recv () {
     if [ "${recv_pool}" = "" ] || [ "${recv_host}" = "" ] ; then
-	media_host_pools[${fstype}]="${media_host_pools[${fstype}]:-`media_host_pools ${fstype}`}"
+        if [ "${media_host_pools[${fstype}]}" = "" ] ; then
+            set_media_host_pools
+        fi
         for recv_host_pool in ${media_host_pools[${fstype}]} ; do
             recv_host=${recv_host_pool%:*}
 	    recv_pool=${recv_host_pool##*:}
