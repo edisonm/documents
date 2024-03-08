@@ -72,8 +72,6 @@ set -e
 
 . ./settings_`hostname`.sh
 
-declare -A avail_ssh
-
 . ./backup_zpool.sh
 . ./backup_btrfs.sh
 
@@ -199,56 +197,39 @@ forall_backjobs () {
         recv_pool=${recv_pool_uuid%@*}
         temp_uuid=${recv_pool_uuid##${recv_pool}}
         recv_uuid=${temp_uuid##@}
-        set_avail_ssh ${send_host}
-        if [ "${avail_ssh[${send_host}]}" = 1 ] ; then
-            $* < /dev/null
-        fi
+        $* < /dev/null
     done < <(list_backjobs)
 }
 
-set_media_host_pool () {
-    media_host_pools[${fstype}]=${mediahost}:${media_pool}
+media_host_pool () {
+    echo ${mediahost}:${media_pool}
 }
 
-set_media_host_pools () {
+media_host_pools () {
+    fstype=${1}
     forall_mediahosts \
         forall_medias \
-        set_media_host_pool
+        media_host_pool
 }
 
 declare -A media_host_pools
 
-set_avail_ssh () {
-    if [ "${avail_ssh[${1}]}" = "" ] ; then
-        do_ssh=`ssh_host ${1}`
-        avail_ssh[${1}]=`${do_ssh} echo 1 2>/dev/null || echo 0`
-    fi
-}
-
 forall_recv () {
     if [ "${recv_pool}" = "" ] || [ "${recv_host}" = "" ] ; then
-        if [ "${media_host_pools[${fstype}]}" = "" ] ; then
-            set_media_host_pools
-        fi
+        media_host_pools[${fstype}]="${media_host_pools[${fstype}]:-`media_host_pools ${fstype}`}"
         for recv_host_pool in ${media_host_pools[${fstype}]} ; do
             recv_host=${recv_host_pool%:*}
 	    recv_pool=${recv_host_pool##*:}
             recv_zpool=${recv_host_pool##*:}
             recv_zpoolfs=${recv_zpool}${recv_zfs}
             recv_ssh="`ssh_host ${recv_host}`"
-            set_avail_ssh ${recv_host}
-            if [ "${avail_ssh[${recv_host}]}" = 1 ] ; then
-                $* < /dev/null
-            fi
+            $* < /dev/null
         done
     else
         recv_zpool=${recv_pool}
 	recv_zpoolfs=${recv_zpool}${recv_zfs}
         recv_ssh="`ssh_host ${recv_host}`"
-        set_avail_ssh ${recv_host}
-        if [ "${avail_ssh[${recv_host}]}" = 1 ] ; then
-            $* < /dev/null
-        fi
+        $* < /dev/null
     fi
 }
 
@@ -277,10 +258,7 @@ forall_zjobs () {
 forall_mediahosts () {
     while IFS=';' read -r mediahost ; do
         media_ssh="`ssh_host ${mediahost}`"
-        set_avail_ssh ${mediahost}
-        if [ "${avail_ssh[${mediahost}]}" = 1 ] ; then
-            $* < /dev/null
-        fi
+        $* < /dev/null
     done < <(list_mediahosts)
 }
 
