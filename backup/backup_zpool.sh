@@ -50,12 +50,12 @@ backup_zpool () {
         # TBD: add '-o keyformat=passphrase -o keylocation=file:///crypto_keyfile.bin' if encrypted
     fi
     snapshot_size=`snapshot_size`
-    ( dryern $send_ssh zfs send -c ${sendopts} ${send_zpoolfs}@${snprefix}${currsnap} \
+    ( ( dryern $send_ssh zfs send -c ${sendopts} ${send_zpoolfs}@${snprefix}${currsnap} \
           | dryerpn pv -reps ${snapshot_size} \
-          | dryerp ${recv_ssh} zfs recv -d -F ${recv_zpoolfs} ) || true
-    if [ "`${recv_ssh} zfs get -H -o value canmount ${recv_zpoolfs}${send_zfs}`" = on ] ; then
-	dryer ${recv_ssh} zfs set canmount=noauto ${recv_zpoolfs}${send_zfs}
-    fi
+          | dryerp ${recv_ssh} zfs recv -d -F ${recv_zpoolfs} ) && \
+      ( if [ "`${recv_ssh} zfs get -H -o value canmount ${recv_zpoolfs}${send_zfs} 2>/dev/null`" = on ] ; then \
+	  dryer ${recv_ssh} zfs set canmount=noauto ${recv_zpoolfs}${send_zfs} ; \
+        fi ) || true )
 }
 
 set_sendopts_zpool () {
