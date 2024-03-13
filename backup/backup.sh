@@ -188,6 +188,11 @@ test_backjobs () {
         test_backjobs_loop
 }
 
+avail_ssh () {
+    do_ssh=`ssh_host ${1}`
+    ${do_ssh} echo 1 2>/dev/null || echo 0
+}
+
 forall_backjobs () {
     recv_host=""
     while IFS=';' read -r send_host fstype send_pool_uuid send_zfs recv_host recv_pool_uuid recv_zfs ; do
@@ -201,7 +206,9 @@ forall_backjobs () {
         recv_pool=${recv_pool_uuid%@*}
         temp_uuid=${recv_pool_uuid##${recv_pool}}
         recv_uuid=${temp_uuid##@}
-        $* < /dev/null
+        if [ `avail_ssh ${send_host}` = 1 ] ; then
+            $* < /dev/null
+        fi
     done < <(list_backjobs)
 }
 
@@ -227,13 +234,17 @@ forall_recv () {
             recv_zpool=${recv_host_pool##*:}
             recv_zpoolfs=${recv_zpool}${recv_zfs}
             recv_ssh="`ssh_host ${recv_host}`"
-            $* < /dev/null
+            if [ `avail_ssh ${recv_host}` = 1 ] ; then
+                $* < /dev/null
+            fi
         done
     else
         recv_zpool=${recv_pool}
 	recv_zpoolfs=${recv_zpool}${recv_zfs}
         recv_ssh="`ssh_host ${recv_host}`"
-        $* < /dev/null
+        if [ `avail_ssh ${recv_host}` = 1 ] ; then
+            $* < /dev/null
+        fi
     fi
 }
 
@@ -271,7 +282,9 @@ forall_zjobs () {
 forall_mediahosts () {
     while IFS=';' read -r mediahost ; do
         media_ssh="`ssh_host ${mediahost}`"
-        $* < /dev/null
+        if [ `avail_ssh ${mediahost}` = 1 ] ; then
+            $* < /dev/null
+        fi
     done < <(list_mediahosts)
 }
 
