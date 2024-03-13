@@ -74,6 +74,8 @@ set -e
 
 . ./settings_`hostname`.sh
 
+hostname=${hostname:-`hostname`}
+
 . ./backup_zpool.sh
 . ./backup_btrfs.sh
 
@@ -151,7 +153,7 @@ dryerp () {
 
 ssh_host () {
     if [ "$1" != "" ] \
-           && [ "$1" != "`hostname`" ] \
+           && [ "$1" != "${hostname}" ] \
            && [ "$1" != localhost ] ; then
         echo "ssh $1"
     fi
@@ -240,6 +242,15 @@ forall_volumes () {
         $* < /dev/null
     done < <(list_volumes)
 }
+
+online_mediahosts () {
+    for mediahostrow in ${mediahosts} ; do
+        mh_ssh="`ssh_host ${mediahostrow}`"
+        ${mh_ssh} echo ${mediahostrow} 2>/dev/null || true
+    done
+}
+
+mediahosts=`online_mediahosts`
 
 list_mediahosts () {
     for mediahostrow in ${mediahosts} ; do
