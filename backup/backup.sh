@@ -57,6 +57,8 @@ set -e
 #
 #   recv_zfs: path of the receiver zfs filesystem
 #
+#   Note that we can not reuse the same target path (target_zfs),
+#   otherwise each backjob will overwrite the previous one.
 
 # - Optionally, a variable called dropsnaps, which lists the snapshots to be
 #   deleted in the next execution of the script.
@@ -429,7 +431,7 @@ zfs_prev () {
 zfs_wrapr () {
     # hasprevs="`${recv_ssh} zfs list -Ho name ${recv_zpoolfs}${send_zfs}@${prevsnap}`"
     # echo hasprevs="`recvsnap|grep "${prevsnap}"`" 1>&2
-    # echo prevsnap="${prevsnap}"
+    # echo prevsnap="${prevsnap}" 1>&2
     if [ "${prevsnap}" = "" ] || [ "`recvsnap|grep "${prevsnap}"`" = "" ] ; then
         action="# first full backup ${currsnap}"
         baktype=full

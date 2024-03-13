@@ -29,11 +29,11 @@ mediahosts=""
 # used to double-check if is the right pool
 
 # Example:
-# backjobs="tbak1;zpool;tank;/ROOT;;;/TST1 \
-#           tbak1;zpool;tank@18072502666171926021;/ROOT;tbak2;tank;/TST1 \
-#           tbak1;btrfs;boot@f1f9009a-ea57-43c2-a650-34f9a57e30af;;;;/TST1 \
-#           tbak1;btrfs;root@c797ec3f-4807-4b16-a32f-aecf0a76feac;/@;;;/TST1 \
-#           tbak1;btrfs;root@c797ec3f-4807-4b16-a32f-aecf0a76feac;/@home;;;/TST1 \
+# backjobs="tbak1;zpool;tank;/ROOT;;;/TST11 \
+#           tbak1;zpool;tank@18072502666171926021;/ROOT;tbak2;tank;/TST12 \
+#           tbak1;btrfs;boot@f1f9009a-ea57-43c2-a650-34f9a57e30af;;;;/TST13 \
+#           tbak1;btrfs;root@c797ec3f-4807-4b16-a32f-aecf0a76feac;/@;;;/TST14 \
+#           tbak1;btrfs;root@c797ec3f-4807-4b16-a32f-aecf0a76feac;/@home;;;/TST15 \
 #           tbak2;zpool;tank;/ROOT;;;/TST2"
 
 backjobs=""

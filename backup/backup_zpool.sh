@@ -53,6 +53,9 @@ backup_zpool () {
     ( dryern $send_ssh zfs send -c ${sendopts} ${send_zpoolfs}@${snprefix}${currsnap} \
           | dryerpn pv -reps ${snapshot_size} \
           | dryerp ${recv_ssh} zfs recv -d -F ${recv_zpoolfs} ) || true
+    if [ "`${recv_ssh} zfs get -H -o value canmount ${recv_zpoolfs}${send_zfs}`" = on ] ; then
+	dryer ${recv_ssh} zfs set canmount=noauto ${recv_zpoolfs}${send_zfs}
+    fi
 }
 
 set_sendopts_zpool () {
@@ -112,7 +115,7 @@ show_import_volume_zpool () {
 
 media_import_volume_zpool () {
     imppool=${1}
-    ${media_ssh} zpool import ${imppool} -R /mnt/${imppool}
+    ${media_ssh} zpool import -N ${imppool} -R /mnt/${imppool}
 }
 
 get_media_import_line_zpool () {
