@@ -11,7 +11,7 @@
 # Machine specific configuration:
 USERNAME=admin
 FULLNAME="Administrative Account"
-DESTNAME=mntedison
+DESTNAME=dedison2
 
 # Distributon.
 DISTRO=debian
@@ -31,10 +31,11 @@ VERSNAME=bookworm
 
 # PROXMOX=
 # PROXMOX=full
-PROXMOX=full
+PROXMOX=boot
 
 # APT Cache Server, leave it empty to disable:
 # APTCACHER=10.8.0.1
+APTCACHER=192.168.1.6
 
 # Specifies if the machine is encrypted:
 ENCRYPT=yes
@@ -54,7 +55,7 @@ UNLOCK_SSH=1
 AUTH_KEY=id_rsa.pub
 
 # Extra packages you want to install, leave empty for a small footprint
-DEBPACKS="acl binutils build-essential openssh-server"
+DEBPACKS="acl binutils build-essential openssh-server gparted mtools"
 DEBPACKS+=" emacs firefox-esr"
 # Equivalent to live xfce4 installation + some tools
 DEBPACKS+=" xfce4 task-xfce-desktop" 
@@ -89,18 +90,18 @@ BOOTSIZE=+2G
 
 # boot partition file system to be used
 # BOOTFS=ext4
-BOOTFS=btrfs
-# BOOTFS=zfs
+# BOOTFS=btrfs
+BOOTFS=zfs
 
 # Root partition size, 0 for max available space, minimum ~20GB
-# ROOTSIZE=0
+ROOTSIZE=0
 # ROOTSIZE=+32G
-ROOTSIZE=+64G
+# ROOTSIZE=+64G
 
 # root partition file system to be used
 # BOOTFS=ext4
-ROOTFS=btrfs
-# ROOTFS=zfs
+# ROOTFS=btrfs
+ROOTFS=zfs
 
 # Swap partition size, placed at the end, empty for no swap, it is recommended
 # to be equal to the available RAM memory
@@ -843,7 +844,7 @@ mount_bpartitions_ext4 () {
 }
 
 mount_bpartitions_zfs () {
-    zpool import bpool -R ${ROOTDIR}
+    zpool import bpool -f -R ${ROOTDIR}
 }
 
 mount_rpartitions_btrfs () {
@@ -856,7 +857,7 @@ mount_rpartitions_ext4 () {
 }
 
 mount_rpartitions_zfs () {
-    zpool import rpool -R ${ROOTDIR}
+    zpool import rpool -f -R ${ROOTDIR}
 }
 
 unmount_bpartitions () {
@@ -1098,7 +1099,8 @@ remove_tpm_tools () {
 }
 
 config_clevis_tpm2 () {
-    cat <<'EOF' > /etc/initramfs-tools/hooks/clevis_tpm2
+    cat <<'EOF' | sed -e s:'<PCR_BANK>':"$PCR_BANK":g \
+	> /etc/initramfs-tools/hooks/clevis_tpm2
 #!/bin/sh
 
 PREREQ="clevis"
@@ -1116,7 +1118,7 @@ esac
 # Begin real processing below this line
 
 copy_file script /usr/bin/clevis-decrypt-tpm2
-copy_exec /usr/bin/tpm2_pcrlist
+copy_exec /usr/bin/tpm2_pcrread
 copy_exec /usr/bin/tpm2_createprimary
 copy_exec /usr/bin/tpm2_load
 copy_exec /usr/bin/tpm2_unseal
@@ -1132,7 +1134,7 @@ copy_exec /usr/lib/x86_64-linux-gnu/libtss2-tcti-mssim.so.0.0.0
 #     copy_exec $file
 # done
 
-clevis encrypt tpm2 '{"key":"rsa","pcr_bank":"sha256","pcr_ids":"7"}' < /crypto_keyfile.bin > ${DESTDIR}/autounlock.key
+clevis encrypt tpm2 '{"key":"rsa","pcr_bank":"<PCR_BANK>","pcr_ids":"7"}' < /crypto_keyfile.bin > ${DESTDIR}/autounlock.key
 
 EOF
     chmod a+x /etc/initramfs-tools/hooks/clevis_tpm2
@@ -1385,8 +1387,16 @@ recheck_tpm1 () {
 }
 
 recheck_tpm2 () {
-    echo | clevis encrypt tpm2 '{"key":"rsa","pcr_bank":"sha256","pcr_ids":"7"}' > /dev/null \
+    echo | clevis encrypt tpm2 '{"key":"rsa","pcr_bank":"'${PCR_BANK}'","pcr_ids":"7"}' > /dev/null \
         && echo 2 || warn_tpm_failure
+}
+
+get_pcr_bank () {
+    if [ "`/usr/bin/tpm2_pcrread sha256:7|grep '7 : '`" == "" ] ; then
+	echo sha1
+    else
+	echo sha256
+    fi
 }
 
 inspkg_encryption () {
@@ -1408,6 +1418,7 @@ inspkg_encryption () {
         if [ "$TPMVERSION" == "2" ] ; then
             # tpm2_clear will remove all TPM keys, but it will make it work --EMM
             tpm2_clear
+            PCR_BANK=`get_pcr_bank`
             TPMVERSION=`recheck_tpm2`
         fi
     fi

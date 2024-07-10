@@ -143,10 +143,7 @@ config_instpacks_proxmox_full () {
 }
 
 config_instpacks_proxmox () {
-    if [ "${VERSNAME}" != bookworm ] ; then
-        INITPACKS+=" systemd-boot"
-    fi
-    INIPACKS+=" proxmox-kernel-6.5 proxmox-kernel-helper"
+    INIPACKS+=" systemd-boot proxmox-kernel-6.5 proxmox-kernel-helper"
     config_instpacks_proxmox_${PROXMOX}
 }
 
