@@ -1653,18 +1653,32 @@ rescue_live () {
     rescue
 }
 
-restore () {
-    prepare_partitions
-    apt-get install --yes pv
-    # EXAMPLE of parameters to restore from a backup/clone a machine, adapt them as needed:
-    SNAPSHOT=__deploy_restsnap__
-    BACKUPSRV=debian3
-    BACKUPSRC=rpool/ROOT/${DESTNAME}@${SNAPSHOT}
+restore_pool () {
+    POOL=$1
+    shift
+    BACKUPSRC=${POOL}/${2}
+    shift
+    # Remove the snapshot if it exist:
     ( ssh ${BACKUPSRV} zfs destroy  -R ${BACKUPSRC} || true )
+    # Create the snapshot to get the latest changes:
     ssh ${BACKUPSRV} zfs snapshot -r ${BACKUPSRC}
     SIZE="`ssh ${BACKUPSRV} zfs send -nvPc -R ${BACKUPSRC} 2>/dev/null | grep size| awk '{print $2}'`"
     ssh ${BACKUPSRV} zfs send -c -R ${BACKUPSRC} | pv -reps ${SIZE} | zfs recv -d -F rpool
-    skip_if_resuming if_encrypt encrypt_partitions
+}
+
+# EXAMPLE of parameters to restore a machine from a backup/clone, adapt them as needed:
+restore () {
+    prepare_partitions
+    apt-get install --yes pv
+    # WARNING: SNAPSHOT is temporary, it will be destroyed
+    SNAPSHOT=__deploy_restsnap__
+    # SERVER name
+    BACKUPSRV=debian3
+    restore_pool rpool ROOT/${DESTNAME}@${SNAPSHOT}
+    restore_pool bpool BOOT/${DESTNAME}@${SNAPSHOT}
+    skip_if_resuming \
+        if_encrypt \
+        encrypt_partitions
     bind_dirs
     config_chroot
     run_chroot /home/${USERNAME}/deploy/deploy.sh chroot_restore
