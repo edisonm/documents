@@ -692,10 +692,9 @@ build_bootpart_zfs () {
           ${COMPZFS} \
           -O normalization=formD \
           -O relatime=on \
-          -O canmount=off -O mountpoint=/boot -R ${ROOTDIR} \
+          -O canmount=off -O mountpoint=none -R ${ROOTDIR} \
           bpool `zfs_layout ${BOOTPARTS}`
-    zfs create -o canmount=off -o mountpoint=none bpool/BOOT
-    zfs create -o mountpoint=/boot bpool/BOOT/${DESTNAME}
+    zfs create -o canmount=on -o mountpoint=/boot bpool/BOOT
 }
 
 build_rootpart_btrfs () {
@@ -726,23 +725,22 @@ build_rootpart_zfs () {
           -O canmount=off -O mountpoint=none -R ${ROOTDIR} \
           rpool `zfs_layout ${ROOTPARTS}`
     
-    zfs create -o canmount=off -o mountpoint=none rpool/ROOT
-    zfs create -o canmount=on  -o mountpoint=/    rpool/ROOT/${DESTNAME}
-    zfs create                                    rpool/ROOT/${DESTNAME}/home
-    zfs create -o canmount=off                    rpool/ROOT/${DESTNAME}/usr
-    zfs create                                    rpool/ROOT/${DESTNAME}/usr/local
-    zfs create -o canmount=off                    rpool/ROOT/${DESTNAME}/var
-    zfs create                                    rpool/ROOT/${DESTNAME}/var/lib
-    zfs create                                    rpool/ROOT/${DESTNAME}/var/lib/apt
-    zfs create                                    rpool/ROOT/${DESTNAME}/var/lib/dpkg
-    zfs create                                    rpool/ROOT/${DESTNAME}/var/lib/AccountsService
-    zfs create                                    rpool/ROOT/${DESTNAME}/var/lib/NetworkManager
-    zfs create                                    rpool/ROOT/${DESTNAME}/var/log
-    zfs create                                    rpool/ROOT/${DESTNAME}/var/spool
+    zfs create -o canmount=on  -o mountpoint=/    rpool/ROOT
+    zfs create                                    rpool/ROOT/home
+    zfs create -o canmount=off                    rpool/ROOT/usr
+    zfs create                                    rpool/ROOT/usr/local
+    zfs create -o canmount=off                    rpool/ROOT/var
+    zfs create                                    rpool/ROOT/var/lib
+    zfs create                                    rpool/ROOT/var/lib/apt
+    zfs create                                    rpool/ROOT/var/lib/dpkg
+    zfs create                                    rpool/ROOT/var/lib/AccountsService
+    zfs create                                    rpool/ROOT/var/lib/NetworkManager
+    zfs create                                    rpool/ROOT/var/log
+    zfs create                                    rpool/ROOT/var/spool
     if [ "${DISTRO}" == ubuntu ] ; then
-        zfs create                                rpool/ROOT/${DESTNAME}/var/snap
+        zfs create                                rpool/ROOT/var/snap
     fi
-    skip_if_bootpart zfs create                   rpool/ROOT/${DESTNAME}/boot
+    skip_if_bootpart zfs create                   rpool/ROOT/boot
 }
 
 set_btrfs_opts () {
@@ -1457,7 +1455,7 @@ show_settings () {
 }
 
 config_kernel_cmdline () {
-    echo "boot=zfs root=ZFS=rpool/ROOT/${DESTNAME} rw" > /etc/kernel/cmdline
+    echo "boot=zfs root=ZFS=rpool/ROOT rw" > /etc/kernel/cmdline
 }
 
 update_boot_proxmox () {
