@@ -37,11 +37,13 @@ PROXMOX=boot
 APTCACHER=10.8.0.1
 # APTCACHER=192.168.1.6
 
-# Specifies if the machine is encrypted:
+# Specifies if the machine is encrypted.  In an enterprise environment always
+# choose luks, since zfs only encrypts the file content but not the structure.
+# For better performance, use zfs.  Note that swap is always encrypted wit luks.
+
 # ENCRYPT=
+ENCRYPT=zfs
 # ENCRYPT=luks
-# ENCRYPT=zfs
-ENCRYPT=luks
 
 # Enable compression
 COMPRESSION=yes
@@ -62,7 +64,7 @@ AUTH_KEY=id_rsa.pub
 DEBPACKS="acl binutils build-essential openssh-server"
 # DEBPACKS+=" emacs firefox-esr gparted mtools"
 # Equivalent to live xfce4 installation + some tools
-# DEBPACKS+=" xfce4 task-xfce-desktop" 
+# DEBPACKS+=" xfce4 task-xfce-desktop"
 # DEBPACKS+=" lxde task-lxde-desktop"
 # DEBPACKS+=" cinnamon task-cinnamon-desktop"
 # DEBPACKS+=" acpid alsa-utils anacron fcitx libreoffice"
@@ -470,12 +472,32 @@ collect_swappart () {
 }
 
 if_encrypt () {
+    if [ "${ENCRYPT}" != "" ] ; then
+        $*
+    fi
+}
+
+if_encrypt_luks () {
     if [ "${ENCRYPT}" == luks ] ; then
         $*
     fi
 }
 
+if_encrypt_zfs () {
+    if [ "${ENCRYPT}" == zfs ] ; then
+        $*
+    fi
+}
+
 if_else_encrypt () {
+    if [ "${ENCRYPT}" != "" ] ; then
+        $1
+    else
+        $2
+    fi
+}
+
+if_else_encrypt_luks () {
     if [ "${ENCRYPT}" == luks ] ; then
         $1
     else
@@ -483,21 +505,31 @@ if_else_encrypt () {
     fi
 }
 
-root_swap_parts_crypt () {
+root_parts_crypt () {
     ROOTPARTS=
     forall_rootpdevs collect_rootpart
+}
+
+root_parts () {
+    ROOTPARTS=${ROOTPDEVS}
+}
+
+swap_parts_crypt () {
     SWAPPARTS=
     forall_swappdevs collect_swappart
 }
 
-root_swap_part () {
-    ROOTPARTS=${ROOTPDEVS}
+swap_part () {
     SWAPPARTS=${SWAPPDEVS}
 }
 
+if_else_encrypt_luks \
+    root_parts_crypt \
+    root_parts
+
 if_else_encrypt \
-    root_swap_parts_crypt \
-    root_swap_parts
+    swap_parts_crypt \
+    swap_parts
 
 first () {
     echo $1
@@ -610,8 +642,10 @@ open_partitions () {
     if [ "$KEY_" == "" ] ; then
         ask_key
     fi
-    forall_rootpdevs open_rootpart
-    forall_swappdevs open_swappart
+    if_encrypt_luks \
+        forall_rootpdevs open_rootpart
+    if_encrypt \
+        forall_swappdevs open_swappart
 }
 
 close_rootpart () {
@@ -623,12 +657,15 @@ close_swappart () {
 }
 
 close_partitions () {
-    forall_rootpdevs close_rootpart
-    forall_swappdevs close_swappart
+    if_encrypt_luks \
+        forall_rootpdevs \
+        close_rootpart
+    forall_swappdevs \
+        close_swappart
 }
 
 crypt_partitions () {
-    for PDEV in ${ROOTPDEVS} ${SWAPPDEVS} ; do
+    for PDEV in $* ; do
         printf "%s" "$KEY_"|cryptsetup luksFormat --key-file - ${PDEV}
     done
 }
@@ -726,16 +763,29 @@ build_rootpart_ext4 () {
     mount_rpartitions_ext4
 }
 
+config_encryption_zfs () {
+    zfs change-key -o keyformat=passphrase -o keylocation=file:///crypto_keyfile.bin rpool
+}
+
+set_encrypt_zfs () {
+    ENCRZFS="-O encryption=on -O keyformat=passphrase -O keylocation=prompt"
+}
+
 build_rootpart_zfs () {
-    zpool create ${FORCEZFS} \
-          -o ashift=12 \
-          -o autotrim=on \
-          -O acltype=posixacl -O xattr=sa -O dnodesize=auto \
-          ${COMPZFS} \
-          -O normalization=formD \
-          -O relatime=on \
-          -O canmount=off -O mountpoint=none -R ${ROOTDIR} \
-          rpool `zfs_layout ${ROOTPARTS}`
+    if_encrypt_zfs \
+        set_encrypt_zfs
+    
+    printf "%s" "$KEY_" | \
+        zpool create ${FORCEZFS} \
+              -o ashift=12 \
+              -o autotrim=on \
+              -O acltype=posixacl -O xattr=sa -O dnodesize=auto \
+              ${COMPZFS} \
+              ${ENCRZFS} \
+              -O normalization=formD \
+              -O relatime=on \
+              -O canmount=off -O mountpoint=none -R ${ROOTDIR} \
+              rpool `zfs_layout ${ROOTPARTS}`
     
     zfs create -o canmount=on  -o mountpoint=/    rpool/ROOT
     zfs create                                    rpool/ROOT/home
@@ -775,13 +825,20 @@ build_partitions () {
     done
 }
 
-create_keyfile () {
+create_keyfile_luks () {
     dd if=/dev/urandom bs=512 count=1 of=${ROOTDIR}/crypto_keyfile.bin
     chmod go-rw ${ROOTDIR}/crypto_keyfile.bin
 }
 
+create_keyfile_zfs () {
+    # since zfs doesn`t support multiple keys, we reuse the password to create the
+    # decryption file
+    printf "%s" "$KEY_" > ${ROOTDIR}/crypto_keyfile.bin
+    chmod go-rw ${ROOTDIR}/crypto_keyfile.bin
+}
+
 encrypt_partitions () {
-    for PDEV in ${ROOTPDEVS} ${SWAPPDEVS} ; do
+    for PDEV in $* ; do
         printf "%s" "$KEY_"|cryptsetup luksAddKey ${PDEV} ${ROOTDIR}/crypto_keyfile.bin --key-file -
     done
 }
@@ -998,7 +1055,7 @@ dump_fstab () {
         skip_if_bootfs_zfs \
         echo "UUID=$(blkid -s UUID -o value ${BOOTPART}) /boot     ${BOOTFS}  defaults,noatime 0 2"
 
-    if_else_encrypt \
+    if_else_encrypt_luks \
         set_fsroot_dev_crypt \
         set_fsroot_dev
 
@@ -1330,8 +1387,11 @@ dump_crypttab () {
         UNLOCKFILE="none               "
         UNLOCKOPTS=",initramfs"
     fi
-    forall_rootpdevs dump_root_entry
-    forall_swappdevs dump_swap_entry
+    if_encrypt_luks \
+        forall_rootpdevs \
+        dump_root_entry
+    forall_swappdevs \
+        dump_swap_entry
 }
 
 config_crypttab () {
@@ -1492,6 +1552,10 @@ config_zfs_bpool () {
     systemctl enable zfs-import-bpool.service
 }
 
+config_zfs_rpool () {
+    systemctl enable zfs-load-key.service
+}
+
 inspkg_dropbear () {
     if [ "${UNLOCK_SSH}" == "1" ] ; then
         apt-get install --yes dropbear-initramfs || true
@@ -1510,7 +1574,7 @@ config_dropbear () {
         cp -f /etc/dropbear/initramfs/dropbear.conf /etc/dropbear/initramfs/dropbear.conf.bak
         cat /etc/dropbear/initramfs/dropbear.conf.bak | \
             sed \
-                -e s:"#DROPBEAR_OPTIONS=.*":'DROPBEAR_OPTIONS="-p 2222 -c cryptroot-unlock"':g \
+                -e s:"#DROPBEAR_OPTIONS=.*":'DROPBEAR_OPTIONS="-p 22 -c cryptroot-unlock"':g \
                 > /etc/dropbear/initramfs/dropbear.conf
         openssh_to_dropbear rsa
         openssh_to_dropbear ed25519
@@ -1537,6 +1601,8 @@ chroot_install () {
     if_else_encrypt \
         config_encryption \
         remove_encryption
+    # if_encrypt_zfs \
+    #     config_encryption_zfs
     inspkg_dropbear
     config_dropbear
     if_encrypt \
@@ -1546,6 +1612,9 @@ chroot_install () {
     if_zfs \
         if_bootpart \
         config_zfs_bpool
+    if_zfs \
+        if_encrypt_zfs \
+        config_zfs_rpool
     config_boot
     update_boot
     apt update
@@ -1556,19 +1625,25 @@ chroot_install () {
 chroot_restore () {
     config_fstab
     config_boot
-    inspkg_encryption
-    config_encryption
-    config_crypttab
+    if_encrypt \
+        inspkg_encryption
+    if_else_encrypt \
+        config_encryption \
+        remove_encryption
+    if_encrypt \
+        config_crypttab
     update_boot
-    config_init
     apt update
     apt --yes full-upgrade
     update-initramfs -c -k all
 }
 
 fix_tpm () {
-    inspkg_encryption
-    config_encryption
+    if_encrypt \
+        inspkg_encryption
+    if_else_encrypt \
+        config_encryption \
+        remove_encryption
     config_crypttab
     update-initramfs -c -k all
 }
@@ -1595,10 +1670,12 @@ prepare_partitions () {
         reopen_partitions \
         create_partitions_${DISKLAYOUT}
     skip_if_resuming \
+        if_encrypt_luks \
+        crypt_partitions ${ROOTPDEVS}
+    skip_if_resuming \
         if_encrypt \
-        crypt_partitions
-    if_encrypt \
-        open_partitions
+        crypt_partitions ${SWAPPDEVS}
+    open_partitions
     if_else_resuming \
         mount_partitions \
         build_partitions
@@ -1613,8 +1690,7 @@ cp_zpool_cache () {
 
 setup_zfs_bpool () {
     mkdir -p ${ROOTDIR}/etc/systemd/system
-    cat <<'EOF' | sed -e s:'<VERSNAME>':"${VERSNAME}":g \
-                      > ${ROOTDIR}/etc/systemd/system/zfs-import-bpool.service
+    cat <<'EOF' > ${ROOTDIR}/etc/systemd/system/zfs-import-bpool.service
 [Unit]
 DefaultDependencies=no
 Before=zfs-import-scan.service
@@ -1633,28 +1709,59 @@ WantedBy=zfs-import.target
 EOF
 }
 
+setup_zfs_rpool () {
+    mkdir -p ${ROOTDIR}/etc/systemd/system
+    cat <<'EOF' > ${ROOTDIR}/etc/systemd/system/zfs-load-key.service
+[Unit]
+Description=Load encryption keys
+DefaultDependencies=no
+After=zfs-import.target
+Before=zfs-mount.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/clevis decrypt < /autounlock.key > /crypto_keyfile.bin ; /sbin/zfs load-key -a
+StandardInput=tty-force
+
+[Install]
+WantedBy=zfs-mount.service
+EOF
+}
+
+# jose jwe enc -p -I decrypted.txt
+
+install_encryption () {
+    if_encrypt_luks \
+        create_keyfile_luks
+    if_encrypt_zfs \
+        create_keyfile_zfs
+    if_encrypt_luks \
+        encrypt_partitions ${ROOTPDEVS}
+    if_encrypt \
+        encrypt_partitions ${SWAPPDEVS}
+}
+
 install () {
     prepare_partitions
     exec_once \
         unpack_distro
     setup_apt
     skip_if_resuming \
-        if_encrypt \
-        create_keyfile
-    skip_if_resuming \
-        if_encrypt \
-        encrypt_partitions
+        install_encryption
     bind_dirs
     config_chroot
     if_zfs cp_zpool_cache
     if_zfs \
         if_bootpart \
         setup_zfs_bpool
+    if_zfs \
+        if_encrypt_zfs \
+        setup_zfs_rpool
     run_chroot /home/${USERNAME}/deploy/deploy.sh chroot_install
     unbind_dirs
     unmount_partitions
-    if_encrypt \
-        close_partitions
+    close_partitions
 }
 
 rescue () {
@@ -1701,8 +1808,11 @@ restore () {
     restore_pool rpool ROOT/${DESTNAME}@${SNAPSHOT}
     restore_pool bpool BOOT/${DESTNAME}@${SNAPSHOT}
     skip_if_resuming \
+        if_encrypt_luks \
+        encrypt_partitions ${ROOTPDEVS}
+    skip_if_resuming \
         if_encrypt \
-        encrypt_partitions
+        encrypt_partitions ${SWAPPDEVS}
     bind_dirs
     config_chroot
     run_chroot /home/${USERNAME}/deploy/deploy.sh chroot_restore
