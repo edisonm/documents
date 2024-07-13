@@ -34,11 +34,14 @@ VERSNAME=bookworm
 PROXMOX=boot
 
 # APT Cache Server, leave it empty to disable:
-# APTCACHER=10.8.0.1
-APTCACHER=192.168.1.6
+APTCACHER=10.8.0.1
+# APTCACHER=192.168.1.6
 
 # Specifies if the machine is encrypted:
-ENCRYPT=yes
+# ENCRYPT=
+# ENCRYPT=luks
+# ENCRYPT=zfs
+ENCRYPT=luks
 
 # Enable compression
 COMPRESSION=yes
@@ -50,15 +53,16 @@ TPMVERFILE=/sys/class/tpm/tpm0/tpm_version_major
 TPMVERSION=`if [ -f ${TPMVERFILE} ] ; then cat ${TPMVERFILE} ; fi`
 
 # Use Dropbear SSH to provide the password to decrypt the machine
-UNLOCK_SSH=1
+# UNLOCK_SSH=1
+
 # Copy here the authorized public key to be used to login SSH
 AUTH_KEY=id_rsa.pub
 
 # Extra packages you want to install, leave empty for a small footprint
-DEBPACKS="acl binutils build-essential openssh-server gparted mtools"
-DEBPACKS+=" emacs firefox-esr"
+DEBPACKS="acl binutils build-essential openssh-server"
+# DEBPACKS+=" emacs firefox-esr gparted mtools"
 # Equivalent to live xfce4 installation + some tools
-DEBPACKS+=" xfce4 task-xfce-desktop" 
+# DEBPACKS+=" xfce4 task-xfce-desktop" 
 # DEBPACKS+=" lxde task-lxde-desktop"
 # DEBPACKS+=" cinnamon task-cinnamon-desktop"
 # DEBPACKS+=" acpid alsa-utils anacron fcitx libreoffice"
@@ -86,7 +90,7 @@ UEFISIZE=+1G
 
 # Boot partition size, empty for no separated boot partition. Compulsory if no
 # zfs and the system doesn't support UEFI
-BOOTSIZE=+2G
+# BOOTSIZE=+2G
 
 # boot partition file system to be used
 # BOOTFS=ext4
@@ -105,8 +109,8 @@ ROOTFS=zfs
 
 # Swap partition size, placed at the end, empty for no swap, it is recommended
 # to be equal to the available RAM memory
-# SWAPSIZE=-8G
-SWAPSIZE=-16G
+SWAPSIZE=-8G
+# SWAPSIZE=-16G
 
 # Unit(s) where you will install Debian
 # DISKS=/dev/mmcblk0
@@ -466,20 +470,34 @@ collect_swappart () {
 }
 
 if_encrypt () {
-    if [ "${ENCRYPT}" == yes ] ; then
+    if [ "${ENCRYPT}" == luks ] ; then
         $*
     fi
 }
 
-if [ "${ENCRYPT}" == yes ] ; then
+if_else_encrypt () {
+    if [ "${ENCRYPT}" == luks ] ; then
+        $1
+    else
+        $2
+    fi
+}
+
+root_swap_parts_crypt () {
     ROOTPARTS=
     forall_rootpdevs collect_rootpart
     SWAPPARTS=
     forall_swappdevs collect_swappart
-else
+}
+
+root_swap_part () {
     ROOTPARTS=${ROOTPDEVS}
     SWAPPARTS=${SWAPPDEVS}
-fi
+}
+
+if_else_encrypt \
+    root_swap_parts_crypt \
+    root_swap_parts
 
 first () {
     echo $1
@@ -589,13 +607,11 @@ open_swappart () {
 }
 
 open_partitions () {
-    if [ "${ENCRYPT}" == yes ] ; then
-        if [ "$KEY_" == "" ] ; then
-            ask_key
-        fi
-        forall_rootpdevs open_rootpart
-        forall_swappdevs open_swappart
+    if [ "$KEY_" == "" ] ; then
+        ask_key
     fi
+    forall_rootpdevs open_rootpart
+    forall_swappdevs open_swappart
 }
 
 close_rootpart () {
@@ -607,18 +623,14 @@ close_swappart () {
 }
 
 close_partitions () {
-    if [ "${ENCRYPT}" == yes ] ; then
-        forall_rootpdevs close_rootpart
-        forall_swappdevs close_swappart
-    fi
+    forall_rootpdevs close_rootpart
+    forall_swappdevs close_swappart
 }
 
 crypt_partitions () {
-    if [ "${ENCRYPT}" == yes ] ; then
-        for PDEV in ${ROOTPDEVS} ${SWAPPDEVS} ; do
-            printf "%s" "$KEY_"|cryptsetup luksFormat --key-file - ${PDEV}
-        done
-    fi
+    for PDEV in ${ROOTPDEVS} ${SWAPPDEVS} ; do
+        printf "%s" "$KEY_"|cryptsetup luksFormat --key-file - ${PDEV}
+    done
 }
 
 build_bootpart_btrfs () {
@@ -962,8 +974,22 @@ config_boot () {
     fi
 }
 
-dump_fstab () {
+set_fsroot_dev_crypt () {
+    ROOTDEV="${ROOTPART}                  "
+}
 
+set_fsroot_dev () {
+    ROOTDEV="UUID=$(blkid -s UUID -o value ${ROOTPART})"
+}
+
+set_fsswap_dev_crypt () {
+    SWAPDEV="${SWAPPART}                   "
+}
+set_fsswap_dev () {
+    SWAPDEV="UUID=$(blkid -s UUID -o value ${SWAPPART})"
+}
+
+dump_fstab () {
     if_uefi \
         skip_if_proxmox \
         echo "UUID=$(blkid -s UUID -o value ${UEFIPART}) /boot/efi vfat  defaults,noatime 0 2"
@@ -971,12 +997,10 @@ dump_fstab () {
     if_bootpart \
         skip_if_bootfs_zfs \
         echo "UUID=$(blkid -s UUID -o value ${BOOTPART}) /boot     ${BOOTFS}  defaults,noatime 0 2"
-    
-    if [ "${ENCRYPT}" == yes ] ; then
-        ROOTDEV="${ROOTPART}                  "
-    else
-        ROOTDEV="UUID=$(blkid -s UUID -o value ${ROOTPART})"
-    fi
+
+    if_else_encrypt \
+        set_fsroot_dev_crypt \
+        set_fsroot_dev
 
     if [ ${ROOTFS} == "btrfs" ] ; then
         echo "$ROOTDEV /         btrfs     subvol=@,defaults,noatime,${COMPBTRFS}space_cache=v2,autodefrag 0 1"
@@ -984,13 +1008,11 @@ dump_fstab () {
     elif  [ ${ROOTFS} == "ext4" ] ; then
         echo "$ROOTDEV /         ext4     defaults,noatime 0 1"
     fi
-    
+
     for SWAPPART in ${SWAPPARTS} ; do
-        if [ "${ENCRYPT}" == yes ] ; then
-            SWAPDEV="${SWAPPART}                   "
-        else
-            SWAPDEV="UUID=$(blkid -s UUID -o value ${SWAPPART})"
-        fi
+        if_else_encrypt \
+            set_fsswap_dev_crypt \
+            set_fsswap_dev
         echo "$SWAPDEV none      swap  sw,pri=1 0 0"
     done
 }
@@ -1313,65 +1335,62 @@ dump_crypttab () {
 }
 
 config_crypttab () {
-    if [ "${ENCRYPT}" == yes ] ; then
-        if [ -f /etc/crypttab ] ; then
-            cp /etc/crypttab /etc/crypttab-
-        fi
-        dump_crypttab > /etc/crypttab
+    if [ -f /etc/crypttab ] ; then
+        cp /etc/crypttab /etc/crypttab-
     fi
+    dump_crypttab > /etc/crypttab
 }
 
 config_encryption () {
-    if [ "${ENCRYPT}" == yes ] ; then
-        
-        skip_if_bootpart \
-            skip_if_proxmox \
-            config_grubenc
-        
-        if [ "$TANGSERV" != "" ] # || [ "$TPMVERSION" == "1" ]
-        then
-            skip_if_proxmox \
-                config_grubip
-            config_network
-        else
-            skip_if_proxmox \
-                remove_grubip
-            remove_network
-        fi
-        if [ "$TANGSERV" != "" ] || [ "$TPMVERSION" == "2" ] ; then
-            config_decrypt_clevis
-            config_clevis
-        else
-            remove_decrypt_clevis
-            remove_clevis
-        fi
-        if [ "$TANGSERV" != "" ] ; then
-            config_clevis_tang
-        else
-            remove_clevis_tang
-        fi
-        if [ "$TPMVERSION" == "1" ] || [ "$TPMVERSION" == "2" ] ; then
-            config_tpm_tis
-        else
-            remove_tpm_tis
-        fi
-        if [ "$TPMVERSION" == "1" ] ; then
-            config_decrypt_tpm
-            config_tpm_tools
-        else
-            remove_decrypt_tpm
-            remove_tpm_tools
-        fi
-        if [ "$TPMVERSION" == "2" ] ; then
-            config_clevis_tpm2
-        else
-            remove_clevis_tpm2
-        fi
+    skip_if_bootpart \
+        skip_if_proxmox \
+        config_grubenc
+    
+    if [ "$TANGSERV" != "" ] # || [ "$TPMVERSION" == "1" ]
+    then
+        skip_if_proxmox \
+            config_grubip
+        config_network
     else
-        skip_if_bootpart \
-            skip_if_proxmox \
-            remove_grubenc
+        skip_if_proxmox \
+            remove_grubip
+        remove_network
     fi
+    if [ "$TANGSERV" != "" ] || [ "$TPMVERSION" == "2" ] ; then
+        config_decrypt_clevis
+        config_clevis
+    else
+        remove_decrypt_clevis
+        remove_clevis
+    fi
+    if [ "$TANGSERV" != "" ] ; then
+        config_clevis_tang
+    else
+        remove_clevis_tang
+    fi
+    if [ "$TPMVERSION" == "1" ] || [ "$TPMVERSION" == "2" ] ; then
+        config_tpm_tis
+    else
+        remove_tpm_tis
+    fi
+    if [ "$TPMVERSION" == "1" ] ; then
+        config_decrypt_tpm
+        config_tpm_tools
+    else
+        remove_decrypt_tpm
+        remove_tpm_tools
+    fi
+    if [ "$TPMVERSION" == "2" ] ; then
+        config_clevis_tpm2
+    else
+        remove_clevis_tpm2
+    fi
+}
+
+remove_encryption () {
+    skip_if_bootpart \
+        skip_if_proxmox \
+        remove_grubenc
 }
 
 warn_tpm_failure () {
@@ -1398,27 +1417,25 @@ get_pcr_bank () {
 }
 
 inspkg_encryption () {
-    if [ "${ENCRYPT}" == yes ] ; then
-        ENCPACKS="cryptsetup cryptsetup-initramfs"
-        if [ "$TANGSERV" != "" ] || [ "$TPMVERSION" == "2" ] ; then
-            ENCPACKS+=" clevis"
-            if [ "$TPMVERSION" == "2" ] ; then
-                ENCPACKS+=" clevis-tpm2"
-            fi
-        fi
-        if [ "$TPMVERSION" == "1" ] ; then
-            ENCPACKS+=" tpm-tools"
-        fi
-        apt-get install --yes ${ENCPACKS} || true
-        if [ "$TPMVERSION" == "1" ] ; then
-            TPMVERSION=`recheck_tpm1`
-        fi
+    ENCPACKS="cryptsetup cryptsetup-initramfs"
+    if [ "$TANGSERV" != "" ] || [ "$TPMVERSION" == "2" ] ; then
+        ENCPACKS+=" clevis"
         if [ "$TPMVERSION" == "2" ] ; then
-            # tpm2_clear will remove all TPM keys, but it will make it work --EMM
-            tpm2_clear
-            PCR_BANK=`get_pcr_bank`
-            TPMVERSION=`recheck_tpm2`
+            ENCPACKS+=" clevis-tpm2"
         fi
+    fi
+    if [ "$TPMVERSION" == "1" ] ; then
+        ENCPACKS+=" tpm-tools"
+    fi
+    apt-get install --yes ${ENCPACKS} || true
+    if [ "$TPMVERSION" == "1" ] ; then
+        TPMVERSION=`recheck_tpm1`
+    fi
+    if [ "$TPMVERSION" == "2" ] ; then
+        # tpm2_clear will remove all TPM keys, but it will make it work --EMM
+        tpm2_clear
+        PCR_BANK=`get_pcr_bank`
+        TPMVERSION=`recheck_tpm2`
     fi
 }
 
@@ -1515,11 +1532,15 @@ chroot_install () {
         if_raid \
         apt-get install --yes mdadm
     config_fstab
-    inspkg_encryption
-    config_encryption
+    if_encrypt \
+        inspkg_encryption
+    if_else_encrypt \
+        config_encryption \
+        remove_encryption
     inspkg_dropbear
     config_dropbear
-    config_crypttab
+    if_encrypt \
+        config_crypttab
     config_noresume
     config_suspend
     if_zfs \
@@ -1574,8 +1595,10 @@ prepare_partitions () {
         reopen_partitions \
         create_partitions_${DISKLAYOUT}
     skip_if_resuming \
+        if_encrypt \
         crypt_partitions
-    open_partitions
+    if_encrypt \
+        open_partitions
     if_else_resuming \
         mount_partitions \
         build_partitions
@@ -1630,7 +1653,8 @@ install () {
     run_chroot /home/${USERNAME}/deploy/deploy.sh chroot_install
     unbind_dirs
     unmount_partitions
-    close_partitions
+    if_encrypt \
+        close_partitions
 }
 
 rescue () {
