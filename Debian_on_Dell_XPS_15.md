@@ -86,7 +86,7 @@ a bug that makes it consume CPU resources like crazy (maybe udisks2 related).
 
   - Clone the firmware
     ```
-    git clone https://github.com/kvalo/ath11k-firmware.git
+    git clone https://git.codelinaro.org/clo/ath-firmware/ath11k-firmware.git
     ```
     
   - Copy the missing firmware files to the right directory
