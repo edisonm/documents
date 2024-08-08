@@ -857,6 +857,11 @@ Shows previous backups done, including offline removable medias
 EOF
 }
 
+last () {
+    shift $(($#-1))
+    echo $1
+}
+
 show_history () {
     zsid=0
     forall_backjobs \
@@ -881,29 +886,32 @@ show_history () {
     zrin=${zrid}
 
     printf "\n%-*s|" `lmax snapshot ${currsnap}` "Snapshot"
-    printf "%-*s" "$((2*$zsin))" "Srcs"
-    printf "\b|"
+    printf "%-*s" "$((2*$zsin-1))" "Srcs"
+    printf "|"
     printf "%s\n" "Targets"
     
     printf "%-*s|" `lmax Snapshot ${currsnap}` "[${snprefix}]"
-    for ((zsid=0;zsid<${zsin};zsid++)) ; do
+    for ((zsid=0;zsid<$((${zsin}-1));zsid++)) ; do
         printf "%-2s" "${zsid}"
     done
-    printf "\b|"
-    for ((zrid=0;zrid<${zrin};zrid++)) ; do
+    printf "%-1s|" $((${zsin}-1))
+    for ((zrid=0;zrid<$((${zrin}-1));zrid++)) ; do
         printf "%-2s" "${zrid}"
     done
-    printf "\b\n"
+    printf "%1s\n" $((${zrin}-1))
     printf "%-8s+" "--------"
-    for ((zsid=0;zsid<${zsin};zsid++)) ; do
+    for ((zsid=0;zsid<$((${zsin}-1));zsid++)) ; do
         printf "%s" "-+"
     done
-    for ((zrid=0;zrid<${zrin};zrid++)) ; do
+    printf "%s" "-"
+    for ((zrid=0;zrid<$((${zrin}-1));zrid++)) ; do
         printf "%s" "-+"
     done
-    printf "\b\n"
+    printf "%s" "-"
+    printf "\n"
     for curr_snapshot in `(send_snapshots;received_snapshots)|sort -u` ; do
         printf "%-*s|" `lmax snapshot ${currsnap}` ${curr_snapshot##${snprefix}}
+	last_send_hostpoolfs="`last ${send_hostpoolfss}`"
         for send_hostpoolfs in ${send_hostpoolfss} ; do
             if [ "`for snapshot in ${send_snapshots[${send_hostpoolfs}]} ; do \
                        echo ${snapshot} ; \
@@ -918,9 +926,14 @@ show_history () {
             else
                 volume_stat="-"
             fi
-            printf "%-2s" "${volume_stat}"
+	    if [ "${last_send_hostpoolfs}" = "${send_hostpoolfs}" ] ; then
+		printf "%-1s" "${volume_stat}"
+	    else
+		printf "%-2s" "${volume_stat}"
+	    fi
         done
-        printf "\b|"
+        printf "|"
+	last_recv_host_pool="`last ${recv_host_pools}`"
         for recv_host_pool in ${recv_host_pools} ; do
             recv_host=${recv_host_pool%:*}
             recv_pool=${recv_host_pool##*:}
@@ -934,9 +947,13 @@ show_history () {
             else
                 volume_stat="-"
             fi
-            printf "%-2s" "${volume_stat}"
+	    if [ "${last_recv_host_pool}" = "${recv_host_pool}" ] ; then
+		printf "%-1s" "${volume_stat}"
+	    else
+		printf "%-2s" "${volume_stat}"
+	    fi
         done
-        printf "\b\n"
+        printf "\n"
     done
     printf "\n"
     echo "Note: X=present, D=to be deleted, -=not present"
