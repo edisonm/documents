@@ -891,23 +891,22 @@ show_history () {
     printf "%s\n" "Targets"
     
     printf "%-*s|" `lmax Snapshot ${currsnap}` "[${snprefix}]"
+
     for ((zsid=0;zsid<$((${zsin}-1));zsid++)) ; do
         printf "%-2s" "${zsid}"
     done
     printf "%-1s|" $((${zsin}-1))
+    
     for ((zrid=0;zrid<$((${zrin}-1));zrid++)) ; do
         printf "%-2s" "${zrid}"
     done
     printf "%1s\n" $((${zrin}-1))
-    printf "%-8s+" "--------"
-    for ((zsid=0;zsid<$((${zsin}-1));zsid++)) ; do
-        printf "%s" "-+"
+
+    printf "%-8s" "--------"
+    for ((zsid=0;zsid<$((${zsin}+${zrin}));zsid++)) ; do
+        printf "%s" "+-"
     done
-    printf "%s" "-"
-    for ((zrid=0;zrid<$((${zrin}-1));zrid++)) ; do
-        printf "%s" "-+"
-    done
-    printf "%s" "-"
+    
     printf "\n"
     for curr_snapshot in `(send_snapshots;received_snapshots)|sort -u` ; do
         printf "%-*s|" `lmax snapshot ${currsnap}` ${curr_snapshot##${snprefix}}
