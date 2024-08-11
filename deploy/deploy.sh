@@ -8,6 +8,17 @@
 
 # Script to automate deployment of Debian/Ubuntu in several scenarios
 
+# To install proxmox, or proxmox based boot, it is recommended to use the
+# Proxmox ISO, to speed up the process.  Once the installation begin, continue
+# just after the language selection, and then press Ctrl+Alt+F3 to get access to
+# a shell and execute this script from there, for example:
+
+# $ cd /tmp;
+# $ mkdir deploy
+# $ cd deploy
+# $ scp username@hostname:apps/documents/deploy/* ./
+# $ ./deploy.sh
+
 # Machine specific configuration:
 USERNAME=admin
 FULLNAME="Administrative Account"
