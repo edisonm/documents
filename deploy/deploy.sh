@@ -39,7 +39,14 @@ APTCACHER=10.8.0.1
 
 # Specifies if the machine is encrypted.  In an enterprise environment always
 # choose luks, since zfs only encrypts the file content but not the structure.
-# For better performance, use zfs.  Note that swap is always encrypted wit luks.
+# For better performance, use zfs.  Note that swap is always encrypted with
+# luks.
+
+# WARNING: If you use zfs, it requires that at least one partition be encrypted
+# with luks, so that the key is unsealed before the zpool key be loaded, since
+# they share the same password file and I didn't try too hard to remove such
+# dependency.  In any case, the luks partition can be the swap, which must be
+# defined out of the pool.
 
 # ENCRYPT=
 ENCRYPT=zfs
@@ -301,17 +308,19 @@ if_raid () {
 
 setenv_commdual () {
     UEFIPARTS=""
-    BOOTPARTS=""
     ROOTPDEVS=""
+    BOOTPARTS=""
     for DISK in ${DISKS} ; do
         PSEP=`psep $DISK`
         # Pick one, later you can sync the other copies
         UEFIPART="${DISK}${PSEP}${UEFISUFF}"
-        BOOTPART="${DISK}${PSEP}${BOOTSUFF}"
         ROOTPDEV="${DISK}${PSEP}${ROOTSUFF}"
         UEFIPARTS+=" ${UEFIPART}"
-        BOOTPARTS+=" ${BOOTPART}"
         ROOTPDEVS+=" ${ROOTPDEV}"
+        if [ "${BOOTSIZE}" != "" ] ; then
+            BOOTPART="${DISK}${PSEP}${BOOTSUFF}"
+            BOOTPARTS+=" ${BOOTPART}"
+        fi
     done
 
     if_raid \
@@ -771,6 +780,10 @@ set_encrypt_zfs () {
     ENCRZFS="-O encryption=on -O keyformat=passphrase -O keylocation=prompt"
 }
 
+load_key_zfs () {
+    printf "%s" "$KEY_" | zfs load-key -L prompt -a
+}
+
 build_rootpart_zfs () {
     if_encrypt_zfs \
         set_encrypt_zfs
@@ -786,7 +799,7 @@ build_rootpart_zfs () {
               -O relatime=on \
               -O canmount=off -O mountpoint=none -R ${ROOTDIR} \
               rpool `zfs_layout ${ROOTPARTS}`
-    
+
     zfs create -o canmount=on  -o mountpoint=/    rpool/ROOT
     zfs create                                    rpool/ROOT/home
     zfs create -o canmount=off                    rpool/ROOT/usr
@@ -846,6 +859,7 @@ encrypt_partitions () {
 setup_aptinstall () {
     setup_nonfree
     if [ "${DISTRO}" != ubuntu ] ; then
+        rm -f /etc/apt/sources.list.d/ceph.list
         cat <<'EOF' | sed -e s:'<VERSNAME>':"${VERSNAME}":g \
                           -e s:'<NONFREE>':"${NONFREE}":g \
                           > /etc/apt/sources.list
@@ -925,6 +939,9 @@ mount_rpartitions_ext4 () {
 
 mount_rpartitions_zfs () {
     zpool import rpool -f -R ${ROOTDIR}
+    if_encrypt_zfs \
+        load_key_zfs
+    zfs mount -a
 }
 
 unmount_bpartitions () {
@@ -1100,7 +1117,7 @@ esac
 copy_file script /usr/bin/clevis-decrypt-tang
 
 curl -sfg http://<TANGSERV>/adv -o /tmp/adv.jws
-clevis encrypt tang '{"url":"http://<TANGSERV>","adv":"/tmp/adv.jws"}' < /crypto_keyfile.bin > ${DESTDIR}/autounlock.key
+( clevis encrypt tang '{"url":"http://<TANGSERV>","adv":"/tmp/adv.jws"}' < /crypto_keyfile.bin > ${DESTDIR}/autounlock.key ) || rm -f ${DESTDIR}/autounlock.key
 
 EOF
     chmod a+x /etc/initramfs-tools/hooks/clevis_tang
@@ -1165,7 +1182,7 @@ echo "127.0.0.1 localhost\n::1     localhost ip6-localhost ip6-loopback\nff02::1
 echo "root:x:0:" > ${DESTDIR}/etc/group
 echo "tss:x:$groupid:" >>  ${DESTDIR}/etc/group
 
-/usr/bin/tpm_sealdata -i /crypto_keyfile.bin -o ${DESTDIR}/autounlock.key -z
+( /usr/bin/tpm_sealdata -i /crypto_keyfile.bin -o ${DESTDIR}/autounlock.key -z ) ||  || rm -f ${DESTDIR}/autounlock.key
 
 EOF
     chmod a+x /etc/initramfs-tools/hooks/tpm_tools
@@ -1211,7 +1228,7 @@ copy_exec /usr/lib/x86_64-linux-gnu/libtss2-tcti-mssim.so.0.0.0
 #     copy_exec $file
 # done
 
-clevis encrypt tpm2 '{"key":"rsa","pcr_bank":"<PCR_BANK>","pcr_ids":"7"}' < /crypto_keyfile.bin > ${DESTDIR}/autounlock.key
+( clevis encrypt tpm2 '{"key":"rsa","pcr_bank":"<PCR_BANK>","pcr_ids":"7"}' < /crypto_keyfile.bin > ${DESTDIR}/autounlock.key ) || rm -f ${DESTDIR}/autounlock.key
 
 EOF
     chmod a+x /etc/initramfs-tools/hooks/clevis_tpm2
@@ -1279,14 +1296,19 @@ config_decrypt_clevis () {
     cat <<'EOF' > /lib/cryptsetup/scripts/decrypt_clevis
 #!/bin/sh
 
-ASKPASS_='/lib/cryptsetup/askpass'
-PROMPT_="${CRYPTTAB_NAME}'s password: "
+decrypt_clevis () {
+    ASKPASS_='/lib/cryptsetup/askpass'
+    PROMPT_="${CRYPTTAB_NAME}'s password: "
 
-if /usr/bin/clevis decrypt < $1 ; then
-    exit 0
-fi
+    if test -f $1 && /usr/bin/clevis decrypt < $1 ; then
+        exit 0
+    fi
 
-$ASKPASS_ "$PROMPT_"
+    $ASKPASS_ "$PROMPT_"
+}
+
+decrypt_clevis $1 | tee /crypto_keyfile.bin
+
 EOF
     chmod a+x /lib/cryptsetup/scripts/decrypt_clevis
 }
@@ -1314,7 +1336,7 @@ if [ -f /usr/sbin/tcsd ] ; then
     /usr/sbin/tcsd
 fi
 
-if /usr/bin/tpm_unsealdata -i $1 -z ; then
+if test -f $1 && /usr/bin/tpm_unsealdata -i $1 -z ; then
     exit 0
 fi
 
@@ -1366,8 +1388,12 @@ dump_root_entry () {
     echo "crypt_root${IDX}            UUID=$(blkid -s UUID -o value ${PDEV}) ${UNLOCKFILE} luks,discard${UNLOCKOPTS}"
 }
 
+# dump_swap_entry () {
+#     echo "crypt_swap${IDX}            UUID=$(blkid -s UUID -o value ${PDEV}) /crypto_keyfile.bin luks"
+# }
+
 dump_swap_entry () {
-    echo "crypt_swap${IDX}            UUID=$(blkid -s UUID -o value ${PDEV}) /crypto_keyfile.bin luks"
+    echo "crypt_swap${IDX}            UUID=$(blkid -s UUID -o value ${PDEV}) ${UNLOCKFILE} luks,discard${UNLOCKOPTS}"
 }
 
 dump_crypttab () {
@@ -1488,13 +1514,21 @@ inspkg_encryption () {
         ENCPACKS+=" tpm-tools"
     fi
     apt-get install --yes ${ENCPACKS} || true
+}
+
+config_pcr_bank () {
+    if [ "$TPMVERSION" == "2" ] ; then
+        PCR_BANK=`get_pcr_bank`
+    fi
+}
+
+recheck_tpmversion () {
     if [ "$TPMVERSION" == "1" ] ; then
         TPMVERSION=`recheck_tpm1`
     fi
     if [ "$TPMVERSION" == "2" ] ; then
         # tpm2_clear will remove all TPM keys, but it will make it work --EMM
         tpm2_clear
-        PCR_BANK=`get_pcr_bank`
         TPMVERSION=`recheck_tpm2`
     fi
 }
@@ -1552,9 +1586,9 @@ config_zfs_bpool () {
     systemctl enable zfs-import-bpool.service
 }
 
-config_zfs_rpool () {
-    systemctl enable zfs-load-key.service
-}
+# config_zfs_rpool () {
+#     systemctl enable zfs-load-key.service
+# }
 
 inspkg_dropbear () {
     if [ "${UNLOCK_SSH}" == "1" ] ; then
@@ -1598,23 +1632,26 @@ chroot_install () {
     config_fstab
     if_encrypt \
         inspkg_encryption
+    config_pcr_bank
     if_else_encrypt \
         config_encryption \
         remove_encryption
-    # if_encrypt_zfs \
-    #     config_encryption_zfs
+    if_encrypt_zfs \
+        config_encryption_zfs
     inspkg_dropbear
     config_dropbear
     if_encrypt \
         config_crypttab
+    if_encrypt \
+        recheck_tpmversion
     config_noresume
     config_suspend
     if_zfs \
         if_bootpart \
         config_zfs_bpool
-    if_zfs \
-        if_encrypt_zfs \
-        config_zfs_rpool
+    # if_zfs \
+    #     if_encrypt_zfs \
+    #     config_zfs_rpool
     config_boot
     update_boot
     apt update
@@ -1627,6 +1664,7 @@ chroot_restore () {
     config_boot
     if_encrypt \
         inspkg_encryption
+    config_pcr_bank
     if_else_encrypt \
         config_encryption \
         remove_encryption
@@ -1641,6 +1679,7 @@ chroot_restore () {
 fix_tpm () {
     if_encrypt \
         inspkg_encryption
+    config_pcr_bank
     if_else_encrypt \
         config_encryption \
         remove_encryption
@@ -1651,14 +1690,21 @@ fix_tpm () {
 check_prereq () {
     apt update
     apt install --yes mokutil
-    if [ "`mokutil --sb-state`" == "SecureBoot enabled" ] && [ "${DISTRO}" != ubuntu ] ; then
+    if [ "`mokutil --sb-state`" == "SecureBoot enabled" ] \
+           && [ "${DISTRO}" == debian ] \
+           && [ "`uname -r|grep pve`" == "" ] ; then
         echo "ERROR: Installing a zfs file system with SecureBoot enabled is not supported"
         exit 1
     fi
 }
 
 prepare_partitions () {
+    if [ "${DISTRO}" != ubuntu ] ; then
+        rm -f /etc/apt/sources.list.d/ceph.list
+    fi
+    apt update
     if_zfs check_prereq
+    apt install --yes cryptsetup
     show_settings
     warn_confirm
     if_else_resuming \
@@ -1709,25 +1755,45 @@ WantedBy=zfs-import.target
 EOF
 }
 
-setup_zfs_rpool () {
-    mkdir -p ${ROOTDIR}/etc/systemd/system
-    cat <<'EOF' > ${ROOTDIR}/etc/systemd/system/zfs-load-key.service
-[Unit]
-Description=Load encryption keys
-DefaultDependencies=no
-After=zfs-import.target
-Before=zfs-mount.service
+# setup_zfs_rpool () {
+#     mkdir -p ${ROOTDIR}/etc/systemd/system
+    
+#     cat <<'EOF' > ${ROOTDIR}/usr/bin/autounlock_zfs
+# #!/bin/bash
 
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/usr/bin/clevis decrypt < /autounlock.key > /crypto_keyfile.bin ; /sbin/zfs load-key -a
-StandardInput=tty-force
+# decrypt_clevis () {
+#     ASKPASS_='/lib/cryptsetup/askpass'
+#     PROMPT_="${CRYPTTAB_NAME}'s password: "
 
-[Install]
-WantedBy=zfs-mount.service
-EOF
-}
+#     if test -f $1 && /usr/bin/clevis decrypt < $1 ; then
+#         exit 0
+#     fi
+
+#     $ASKPASS_ "$PROMPT_"
+# }
+
+# decrypt_clevis /autounlock.key | /sbin/zfs load-key -L prompt -a
+# EOF
+    
+#     chmod a+x ${ROOTDIR}/usr/bin/autounlock_zfs
+    
+#     cat <<'EOF' > ${ROOTDIR}/etc/systemd/system/zfs-load-key.service
+# [Unit]
+# Description=Load encryption keys
+# DefaultDependencies=no
+# After=zfs-import.target
+# Before=zfs-mount.service
+
+# [Service]
+# Type=oneshot
+# RemainAfterExit=yes
+# ExecStart=/usr/bin/autounlock_zfs
+# StandardInput=tty-force
+
+# [Install]
+# WantedBy=zfs-mount.service
+# EOF
+# }
 
 # jose jwe enc -p -I decrypted.txt
 
@@ -1755,20 +1821,29 @@ install () {
     if_zfs \
         if_bootpart \
         setup_zfs_bpool
-    if_zfs \
-        if_encrypt_zfs \
-        setup_zfs_rpool
+    # if_zfs \
+    #     if_encrypt_zfs \
+    #     setup_zfs_rpool
     run_chroot /home/${USERNAME}/deploy/deploy.sh chroot_install
     unbind_dirs
     unmount_partitions
     close_partitions
 }
 
+if_live () {
+    if [ -d /cdrom/dists/${VERSNAME} ] ; then
+        $*
+    fi
+}
+
 rescue () {
     RESUMING=yes
+    if_live \
+        setup_aptinstall
+    apt update
+    apt install --yes cryptsetup
     ask_key
     config_aptcacher
-    setup_aptinstall
     open_partitions
     mount_partitions
     bind_dirs
@@ -1777,11 +1852,6 @@ rescue () {
     unbind_dirs
     unmount_partitions
     close_partitions
-}
-
-rescue_live () {
-    setup_aptinstall
-    rescue
 }
 
 restore_pool () {
