@@ -1399,10 +1399,6 @@ dump_root_entry () {
     echo "crypt_root${IDX}            UUID=$(blkid -s UUID -o value ${PDEV}) ${UNLOCKFILE} luks,discard${UNLOCKOPTS}"
 }
 
-# dump_swap_entry () {
-#     echo "crypt_swap${IDX}            UUID=$(blkid -s UUID -o value ${PDEV}) /crypto_keyfile.bin luks"
-# }
-
 dump_swap_entry () {
     echo "crypt_swap${IDX}            UUID=$(blkid -s UUID -o value ${PDEV}) ${UNLOCKFILE} luks,discard${UNLOCKOPTS}"
 }
@@ -1597,10 +1593,6 @@ config_zfs_bpool () {
     systemctl enable zfs-import-bpool.service
 }
 
-# config_zfs_rpool () {
-#     systemctl enable zfs-load-key.service
-# }
-
 inspkg_dropbear () {
     if [ "${UNLOCK_SSH}" == "1" ] ; then
         apt-get install --yes dropbear-initramfs || true
@@ -1660,9 +1652,6 @@ chroot_install () {
     if_zfs \
         if_bootpart \
         config_zfs_bpool
-    # if_zfs \
-    #     if_encrypt_zfs \
-    #     config_zfs_rpool
     config_boot
     update_boot
     apt update
@@ -1766,48 +1755,6 @@ WantedBy=zfs-import.target
 EOF
 }
 
-# setup_zfs_rpool () {
-#     mkdir -p ${ROOTDIR}/etc/systemd/system
-    
-#     cat <<'EOF' > ${ROOTDIR}/usr/bin/autounlock_zfs
-# #!/bin/bash
-
-# decrypt_clevis () {
-#     ASKPASS_='/lib/cryptsetup/askpass'
-#     PROMPT_="${CRYPTTAB_NAME}'s password: "
-
-#     if test -f $1 && /usr/bin/clevis decrypt < $1 ; then
-#         exit 0
-#     fi
-
-#     $ASKPASS_ "$PROMPT_"
-# }
-
-# decrypt_clevis /autounlock.key | /sbin/zfs load-key -L prompt -a
-# EOF
-    
-#     chmod a+x ${ROOTDIR}/usr/bin/autounlock_zfs
-    
-#     cat <<'EOF' > ${ROOTDIR}/etc/systemd/system/zfs-load-key.service
-# [Unit]
-# Description=Load encryption keys
-# DefaultDependencies=no
-# After=zfs-import.target
-# Before=zfs-mount.service
-
-# [Service]
-# Type=oneshot
-# RemainAfterExit=yes
-# ExecStart=/usr/bin/autounlock_zfs
-# StandardInput=tty-force
-
-# [Install]
-# WantedBy=zfs-mount.service
-# EOF
-# }
-
-# jose jwe enc -p -I decrypted.txt
-
 install_encryption () {
     if_encrypt_luks \
         create_keyfile_luks
@@ -1832,9 +1779,6 @@ install () {
     if_zfs \
         if_bootpart \
         setup_zfs_bpool
-    # if_zfs \
-    #     if_encrypt_zfs \
-    #     setup_zfs_rpool
     run_chroot /home/${USERNAME}/deploy/deploy.sh chroot_install
     unbind_dirs
     unmount_partitions
@@ -1858,7 +1802,6 @@ rescue () {
     open_partitions
     mount_partitions
     bind_dirs
-    # config_chroot
     run_chroot
     unbind_dirs
     unmount_partitions
