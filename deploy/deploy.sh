@@ -60,8 +60,8 @@ APTCACHER=10.8.0.1
 # defined out of the pool.
 
 # ENCRYPT=
-ENCRYPT=zfs
-# ENCRYPT=luks
+# ENCRYPT=zfs
+ENCRYPT=luks
 
 # Enable compression
 COMPRESSION=yes
@@ -1318,6 +1318,11 @@ decrypt_clevis () {
     $ASKPASS_ "$PROMPT_"
 }
 
+if [ -f /crypto_keyfile.bin ] ; then
+   cat /crypto_keyfile.bin
+   exit 0
+fi
+
 decrypt_clevis $1 | tee /crypto_keyfile.bin
 
 EOF
@@ -1786,7 +1791,8 @@ install () {
 }
 
 if_live () {
-    if [ -d /cdrom/dists/${VERSNAME} ] ; then
+    if [ -d /cdrom/dists/${VERSNAME} ] \
+           || [ -d /run/live/medium/dists/${VERSNAME} ] ; then
         $*
     fi
 }
