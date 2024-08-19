@@ -32,7 +32,7 @@ replicate () {
             ssub_dir="`zfs get -H mountpoint ${ssub_zfs} -o value | sed -e "s:${send_dir}::g"`"
             snapshot_dir=${send_dir}${ssub_dir}/.zfs/snapshot/${snapshot}
             if [ -d ${snapshot_dir} ] ; then
-                dryer rsync -a --delete --delete-excluded ${snapshot_dir}/ ${recv_dir}/ || true
+                dryer rsync -a --delete ${snapshot_dir}/ ${recv_dir}/ || true
                 changed=1
             fi
         done
@@ -40,6 +40,7 @@ replicate () {
             dryer zfs snapshot -r ${recv_zfs}@${snapshot}
         fi
     done
+    dryer rsync -a --delete --exclude=.zfs ${send_dir}/ ${recv_dir}/
 }
 
 replicate $*
