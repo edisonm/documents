@@ -79,7 +79,9 @@ TPMVERSION=`if [ -f ${TPMVERFILE} ] ; then cat ${TPMVERFILE} ; fi`
 AUTH_KEY=id_rsa.pub
 
 # Extra packages you want to install, leave empty for a small footprint
-DEBPACKS="acl binutils build-essential openssh-server"
+# ntp is compulsory for services that require precise date/time (i.e., AD)
+
+DEBPACKS="ntp acl binutils build-essential openssh-server"
 # DEBPACKS+=" emacs firefox-esr gparted mtools"
 # Equivalent to live xfce4 installation + some tools
 # DEBPACKS+=" xfce4 task-xfce-desktop"
