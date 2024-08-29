@@ -32,7 +32,7 @@ zfs_prev_zpool () {
         for send_zpoolfs in ${send_zpoolfss} ; do
             send_zfs=${send_zpoolfs##${send_zpool}}
             prevsnap=`prevsnap ${prevcmd}`
-            sendopts="-R"
+            sendopts=""
 	    dropopts=""
             $*
         done
