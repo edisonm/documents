@@ -1195,6 +1195,10 @@ echo "127.0.0.1 localhost\n::1     localhost ip6-localhost ip6-loopback\nff02::1
 echo "root:x:0:" > ${DESTDIR}/etc/group
 echo "tss:x:$groupid:" >>  ${DESTDIR}/etc/group
 
+if [ -f /usr/sbin/tcsd ] ; then
+    /usr/sbin/tcsd
+fi
+
 ( /usr/bin/tpm_sealdata -i /crypto_keyfile.bin -o ${DESTDIR}/autounlock.key -z ) ||  || rm -f ${DESTDIR}/autounlock.key
 
 EOF
