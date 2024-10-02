@@ -39,13 +39,13 @@ set -e
 # - A variable called backjobs that returns a list of semi-colon delimited rows
 #   with the next columns:
 #
-#   source_host;source_pool;source_zfs;target_host;target_pool;target_zfs
+#   send_host;backend;send_pool;send_zfs;recv_host;recv_pool;recv_zfs
 #
 #   Where:
 #
-#   backend: specifies the filesystem type, can be zpool or btrfs
-#
 #   send_host: hostname where the sender resides. Empty means localhost.
+#
+#   backend: specifies the filesystem type, can be zpool (stable) or btrfs (in development)
 #
 #   send_pool: sender zpool. Empty means is a removable media.
 #
@@ -53,9 +53,10 @@ set -e
 #
 #   recv_host: hostname where the receiver will reside. Empty means localhost
 #
-#   recv_pool: receiver zpool. Empty means is the removable media
+#   recv_pool: receiver zpool. Empty means is a removable media
 #
-#   recv_zfs: path of the receiver zfs filesystem
+#   recv_zfs: path of the receiver zfs filesystem. If empty and
+#   send_host is not empty, then /send_host/send_pool will be used
 #
 #   Note that we can not reuse the same target path (target_zfs),
 #   otherwise each backjob will overwrite the previous one.
@@ -195,7 +196,7 @@ avail_ssh () {
 
 forall_backjobs () {
     recv_host=""
-    while IFS=';' read -r send_host fstype send_pool_uuid send_zfs recv_host recv_pool_uuid recv_zfs ; do
+    while IFS=';' read -r send_host fstype send_pool_uuid send_zfs recv_host recv_pool_uuid recv_zfs_ ; do
         send_pool=${send_pool_uuid%@*}
         temp_uuid=${send_pool_uuid##${send_pool}}
         send_uuid=${temp_uuid##@}
@@ -206,6 +207,11 @@ forall_backjobs () {
         recv_pool=${recv_pool_uuid%@*}
         temp_uuid=${recv_pool_uuid##${recv_pool}}
         recv_uuid=${temp_uuid##@}
+	
+	if [ "${recv_zfs_}" = "" ] && [ "${send_host}" != "" ] && [ "${send_host}" != "localhost" ]; then
+	    recv_zfs="/${send_host}/${send_pool}"
+	fi
+	
         if [ "`avail_ssh ${send_host}`" = 1 ] ; then
             $* < /dev/null
         fi
@@ -644,9 +650,9 @@ statistics () {
 zpool_list () {
     echo "Volumes on ${mediahost}"
     echo "zpool:"
-    ${media_ssh} zpool list
+    ( ${media_ssh} zpool list ) || true
     echo "btrfs:"
-    ${media_ssh} lsblk -f|grep btrfs
+    ( ${media_ssh} lsblk -f|grep btrfs ) || true
 }
 
 backups () {
@@ -1050,7 +1056,7 @@ del_prefix_snapshots () {
 }
 
 recv_canmount () {
-    dryer ${recv_ssh} zfs set canmount=${1} ${recv_zpoolfs}${send_zfs}
+    dryer ${recv_ssh} zfs set canmount=${1} ${recv_zpoolfs}${send_zfs} || true
 }
 
 dump_snapshot () {
