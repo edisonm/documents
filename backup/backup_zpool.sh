@@ -32,7 +32,7 @@ zfs_prev_zpool () {
         for send_zpoolfs in ${send_zpoolfss} ; do
             send_zfs=${send_zpoolfs##${send_zpool}}
             prevsnap=`prevsnap ${prevcmd}`
-            sendopts=""
+            sendopts="-R"
 	    dropopts=""
             $*
         done
@@ -54,9 +54,13 @@ backup_zpool () {
           | dryerpn pv -reps ${snapshot_size} \
           | dryerp ${recv_ssh} zfs recv -d -F ${recv_zpoolfs} ) || true )
     send_canmount_value="`${send_ssh} zfs get -H -o value canmount ${send_zpoolfs} 2>/dev/null`"
+    if [ "${send_canmount_value}" = on ] ; then
+        # change to noauto to avoid mounting of backup filesystems
+        send_canmount_value=noauto
+    fi
     recv_canmount_value="`${recv_ssh} zfs get -H -o value canmount ${recv_zpoolfs}${send_zfs} 2>/dev/null || true`"
     if [ "${send_canmount_value}" != "${recv_canmount_value}" ] ; then
-	dryer ${recv_ssh} zfs set canmount=${send_canmount_value} ${recv_zpoolfs}${send_zfs}
+	dryer ${recv_ssh} zfs set -u canmount=${send_canmount_value} ${recv_zpoolfs}${send_zfs} || true
     fi
     # if [ "${baktype}" = full ] ; then ...
     send_mountpoint_source="`${send_ssh} zfs get -H -o source mountpoint ${send_zpoolfs} 2>/dev/null`"
@@ -66,7 +70,7 @@ backup_zpool () {
 	    mountpoint="/${send_host}${send_mountpoint_value}"
 	    recv_mountpoint_source="`${recv_ssh} zfs get -H -o value mountpoint ${recv_zpoolfs}${send_zfs} 2>/dev/null || true`"
 	    if [ "${recv_mountpoint_source}" != "${mountpoint}" ] ; then
-		dryer ${recv_ssh} zfs set mountpoint=${mountpoint} ${recv_zpoolfs}${send_zfs}
+		dryer ${recv_ssh} zfs set -u mountpoint=${mountpoint} ${recv_zpoolfs}${send_zfs}
 	    fi
 	fi
     fi
@@ -129,6 +133,7 @@ show_import_volume_zpool () {
 
 media_import_volume_zpool () {
     imppool=${1}
+    # Note: for some reason -N doesn't work properly
     ${media_ssh} zpool import -N ${imppool} -R /mnt/${imppool}
 }
 

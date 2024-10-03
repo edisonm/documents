@@ -2,7 +2,7 @@
 
 . `dirname $0`/common.sh
 
-# set -x
+set -x
 
 # 2021-05-03 by Edison Mera
 

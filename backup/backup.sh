@@ -1056,7 +1056,7 @@ del_prefix_snapshots () {
 }
 
 recv_canmount () {
-    dryer ${recv_ssh} zfs set canmount=${1} ${recv_zpoolfs}${send_zfs} || true
+    dryer ${recv_ssh} zfs set -u canmount=${1} ${recv_zpoolfs}${send_zfs} || true
 }
 
 dump_snapshot () {
