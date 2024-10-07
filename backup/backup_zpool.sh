@@ -61,12 +61,15 @@ backup_zpool () {
           | dryerp ${recv_ssh} zfs recv -d -F ${recv_zpoolfs} ) || true )
 }
 
+# enable in Debian 12:
+# zfssetopts="-u"
+
 offmount_zpool () {
     send_canmount_value="`${send_ssh} zfs get -H -o value canmount ${send_zpoolfs} 2>/dev/null`"
     if [ "${send_canmount_value}" != "-" ] ; then
         recv_canmount_value="`${recv_ssh} zfs get -H -o value canmount ${recv_zpoolfs}${send_zfs} 2>/dev/null || true`"
         if [ "${recv_canmount_value}" != "off" ] ; then
-            dryer ${recv_ssh} zfs set -u canmount=off ${recv_zpoolfs}${send_zfs}
+            dryer ${recv_ssh} zfs set ${zfssetopts} canmount=off ${recv_zpoolfs}${send_zfs}
         fi
     fi
     send_mountpoint_source="`${send_ssh} zfs get -H -o source mountpoint ${send_zpoolfs} | awk '{print $1}' 2>/dev/null`"
@@ -76,7 +79,7 @@ offmount_zpool () {
 	    mountpoint="/${send_host}${send_mountpoint_value}"
 	    recv_mountpoint_value="`${recv_ssh} zfs get -H -o value mountpoint ${recv_zpoolfs}${send_zfs} 2>/dev/null || true`"
 	    if [ "${recv_mountpoint_value}" != "/mnt/${recv_zpool}${mountpoint}" ] ; then
-		dryer ${recv_ssh} zfs set -u mountpoint=${mountpoint} ${recv_zpoolfs}${send_zfs}
+		dryer ${recv_ssh} zfs set ${zfssetopts} mountpoint=${mountpoint} ${recv_zpoolfs}${send_zfs}
 	    fi
 	fi
     elif [ "${send_mountpoint_source}" = inherited ] ; then
@@ -98,7 +101,7 @@ fixmount_zpool () {
     recv_canmount_value="`${recv_ssh} zfs get -H -o value canmount ${recv_zpoolfs}${send_zfs} 2>/dev/null || true`"
     fixmount_file="data/fixmount_${send_host}_${recv_zpool}.sh"
     if [ "${send_canmount_value}" != "${recv_canmount_value}" ] ; then
-	echo zfs set -u canmount=${send_canmount_value} ${recv_zpoolfs}${send_zfs} >> "${fixmount_file}"
+	echo zfs set ${zfssetopts} canmount=${send_canmount_value} ${recv_zpoolfs}${send_zfs} >> "${fixmount_file}"
     fi
     send_mountpoint_source="`${send_ssh} zfs get -H -o source mountpoint ${send_zpoolfs} 2>/dev/null`"
     recv_mountpoint_source="`${recv_ssh} zfs get -H -o source mountpoint ${recv_zpoolfs}${send_zfs} 2>/dev/null || true`"
@@ -109,7 +112,7 @@ fixmount_zpool () {
             send_mountpoint_value="`${send_ssh} zfs get -H -o value mountpoint ${send_zpoolfs} 2>/dev/null`"
             recv_mountpoint_value="`${recv_ssh} zfs get -H -o value mountpoint ${recv_zpoolfs}${send_zfs} 2>/dev/null || true`"
             if [ "${send_mountpoint_value}" != "${recv_mountpoint_value}" ] ; then
-                echo zfs set -u mountpoint=${send_mountpoint_value} ${recv_zpoolfs}${send_zfs} >> "${fixmount_file}"
+                echo zfs set ${zfssetopts} mountpoint=${send_mountpoint_value} ${recv_zpoolfs}${send_zfs} >> "${fixmount_file}"
             fi
         fi
     fi
