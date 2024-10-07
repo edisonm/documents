@@ -282,7 +282,8 @@ test_mediahost () {
 forall_zjobs () {
     forall_backjobs \
         forall_recv \
-        zfs_prev listsnap $*
+        zfs_prev \
+        listsnap $*
 }
 
 forall_mediahosts () {
@@ -499,13 +500,6 @@ skip_eq_sendrecv () {
     fi
 }
 
-backup () {
-    if [ "`recvsnap|grep ${currsnap}`" = "" ] ; then
-        echo $action ${send_host}:${send_zpoolfs} to ${recv_host}:${recv_zpoolfs}
-        backup_${fstype}
-    fi
-}
-
 update_fields () {
     field1="${send_host}:${send_zpoolfs}"
     field1_maxw=$((${field1_maxw}>${#field1}?${field1_maxw}:${#field1}))
@@ -655,11 +649,45 @@ zpool_list () {
     ( ${media_ssh} lsblk -f|grep btrfs ) || true
 }
 
+backup () {
+    if [ "`recvsnap|grep ${currsnap}`" = "" ] ; then
+        echo $action ${send_host}:${send_zpoolfs} to ${recv_host}:${recv_zpoolfs}
+        backup_${fstype}
+    fi
+}
+
 backups () {
     forall_zjobs \
         zfs_wrapr \
         skip_eq_sendrecv \
         backup
+}
+
+offmount () {
+    offmount_${fstype}
+}
+
+offmounts () {
+    send_unfold=1
+    forall_zjobs \
+        zfs_wrapr \
+        skip_eq_sendrecv \
+        offmount
+    send_unfold=0
+}
+
+fixmount () {
+    fixmount_${fstype}
+}
+
+fixmounts () {
+    send_unfold=1
+    rm -f data/fixmount_*.sh
+    forall_zjobs \
+        zfs_wrapr \
+        skip_eq_sendrecv \
+        fixmount
+    send_unfold=0
 }
 
 lambda () {
@@ -1055,10 +1083,6 @@ del_prefix_snapshots () {
         del_prefix_snapshot $*
 }
 
-recv_canmount () {
-    dryer ${recv_ssh} zfs set -u canmount=${1} ${recv_zpoolfs}${send_zfs} || true
-}
-
 dump_snapshot () {
     echo ${snapshot}
 }
@@ -1129,15 +1153,6 @@ smartretp () {
     done
 }
 
-# use this if you have problems exporting the pool, so that is not mounted
-# automatically, for instance, ./backup.sh recvs_canmount off
-recvs_canmount () {
-    send_unfold=1
-    forall_zjobs \
-        skip_eq_sendrecv \
-        recv_canmount $*
-}
-
 waitsecs () {
     printf "waiting to end ..."
     for ((i=$1;i>0;i--)) ; do printf " %d" $i ; sleep 1 ; done; echo
@@ -1159,6 +1174,10 @@ all () {
     hotrun snapshots
     exec_smartretp
     backups
+    # set canmount=off to avoid filesystems compiting for the same mountpoint:
+    offmounts
+    # generate data/fixmount_*.sh to restore the attributes of the filesystem:
+    fixmounts
     backup_log
     show_history
     statistics
