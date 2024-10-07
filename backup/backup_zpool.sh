@@ -30,12 +30,11 @@ zfs_prev_zpool () {
     if [ "${send_unfold}" != "" ] || ( [ "${prevsnap}" != "" ] && [ `requires_unfold ${prevcmd}` = 1 ] ) ; then
         # echo "Note: unfolding -R since some incrementals are incomplete"
         for send_zpoolfs in ${send_zpoolfss} ; do
-            send_zfs=${send_zpoolfs##${send_zpool}}
             prevsnap=`prevsnap ${prevcmd}`
             sendopts="-R"
             sizeopts=""
 	    dropopts=""
-            $*
+            send_zfs=${send_zpoolfs##${send_zpool}} $*
         done
     else
         sendopts="-R"
