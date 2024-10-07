@@ -668,12 +668,13 @@ offmount () {
 }
 
 offmounts () {
+    prev_unfold=${send_unfold}
     send_unfold=1
     forall_zjobs \
         zfs_wrapr \
         skip_eq_sendrecv \
         offmount
-    send_unfold=0
+    send_unfold=${prev_unfold}
 }
 
 fixmount () {
@@ -681,13 +682,14 @@ fixmount () {
 }
 
 fixmounts () {
+    prev_unfold=${send_unfold}
     send_unfold=1
     rm -f data/fixmount_*.sh
     forall_zjobs \
         zfs_wrapr \
         skip_eq_sendrecv \
         fixmount
-    send_unfold=0
+    send_unfold=${prev_unfold}
 }
 
 lambda () {
