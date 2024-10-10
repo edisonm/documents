@@ -2,7 +2,7 @@
 
 . `dirname $0`/common.sh
 
-set -x
+# set -x
 
 # 2021-05-03 by Edison Mera
 
@@ -1694,7 +1694,7 @@ fix_tpm () {
     if_else_encrypt \
         config_encryption \
         remove_encryption
-    config_crypttab
+    # config_crypttab
     update-initramfs -c -k all
 }
 
