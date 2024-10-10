@@ -66,33 +66,36 @@ backup_zpool () {
 
 offmount_zpool () {
     send_canmount_value="`${send_ssh} zfs get -H -o value canmount ${send_zpoolfs} 2>/dev/null`"
-    if [ "${send_canmount_value}" != "-" ] ; then
-        recv_canmount_value="`${recv_ssh} zfs get -H -o value canmount ${recv_zpoolfs}${send_zfs} 2>/dev/null || true`"
-        if [ "${recv_canmount_value}" != "off" ] ; then
-            dryer ${recv_ssh} zfs set ${zfssetopts} canmount=off ${recv_zpoolfs}${send_zfs}
-        fi
-    fi
-    send_mountpoint_source="`${send_ssh} zfs get -H -o source mountpoint ${send_zpoolfs} | awk '{print $1}' 2>/dev/null`"
-    if [ "${send_mountpoint_source}" = local ] || [ "${send_mountpoint_source}" = received ] ; then
-	send_mountpoint_value="`${send_ssh} zfs get -H -o value mountpoint ${send_zpoolfs} 2>/dev/null`"
-	if [ "${send_mountpoint_value}" != none ] ; then
-	    mountpoint="/${send_host}${send_mountpoint_value}"
-	    recv_mountpoint_value="`${recv_ssh} zfs get -H -o value mountpoint ${recv_zpoolfs}${send_zfs} 2>/dev/null || true`"
-	    if [ "${recv_mountpoint_value}" != "/mnt/${recv_zpool}${mountpoint}" ] ; then
-		dryer ${recv_ssh} zfs set ${zfssetopts} mountpoint=${mountpoint} ${recv_zpoolfs}${send_zfs}
-	    fi
+    recv_canmount_value="`${recv_ssh} zfs get -H -o value canmount ${recv_zpoolfs}${send_zfs} 2>/dev/null || true`"
+
+    if [ "${recv_canmount_value}" != "" ] ; then # if the recv exists
+	if [ "${send_canmount_value}" != "-" ] ; then
+            if [ "${recv_canmount_value}" != "off" ] ; then
+		dryer ${recv_ssh} zfs set ${zfssetopts} canmount=off ${recv_zpoolfs}${send_zfs}
+            fi
 	fi
-    elif [ "${send_mountpoint_source}" = inherited ] ; then
-        recv_mountpoint_source="`${recv_ssh} zfs get -H -o source mountpoint ${recv_zpoolfs}${send_zfs} | awk '{print $1}' 2>/dev/null || true`"
-        if [ "${send_mountpoint_source}" != "${recv_mountpoint_source}" ] ; then
-            dryer ${recv_ssh} zfs inherit mountpoint ${recv_zpoolfs}${send_zfs}
-        fi
-    elif [ "${send_mountpoint_source}" = "-" ] ; then
-        # mountpoint doesn't apply
-        true
-    else
-        # unhandled situation, just print the command to see what happened
-        echo "# ${recv_host} zfs send_mountpoint_source=${send_mountpoint_source} ${recv_zpoolfs}${send_zfs}"
+	send_mountpoint_source="`${send_ssh} zfs get -H -o source mountpoint ${send_zpoolfs} | awk '{print $1}' 2>/dev/null`"
+	if [ "${send_mountpoint_source}" = local ] || [ "${send_mountpoint_source}" = received ] ; then
+	    send_mountpoint_value="`${send_ssh} zfs get -H -o value mountpoint ${send_zpoolfs} 2>/dev/null`"
+	    if [ "${send_mountpoint_value}" != none ] ; then
+		mountpoint="/${send_host}${send_mountpoint_value}"
+		recv_mountpoint_value="`${recv_ssh} zfs get -H -o value mountpoint ${recv_zpoolfs}${send_zfs} 2>/dev/null || true`"
+		if [ "${recv_mountpoint_value}" != "/mnt/${recv_zpool}${mountpoint}" ] ; then
+		    dryer ${recv_ssh} zfs set ${zfssetopts} mountpoint=${mountpoint} ${recv_zpoolfs}${send_zfs}
+		fi
+	    fi
+	elif [ "${send_mountpoint_source}" = inherited ] ; then
+            recv_mountpoint_source="`${recv_ssh} zfs get -H -o source mountpoint ${recv_zpoolfs}${send_zfs} | awk '{print $1}' 2>/dev/null || true`"
+            if [ "${send_mountpoint_source}" != "${recv_mountpoint_source}" ] ; then
+		dryer ${recv_ssh} zfs inherit mountpoint ${recv_zpoolfs}${send_zfs}
+            fi
+	elif [ "${send_mountpoint_source}" = "-" ] ; then
+            # mountpoint doesn't apply
+            true
+	else
+            # unhandled situation, just print the command to see what happened
+            echo "# ${recv_host} zfs send_mountpoint_source=${send_mountpoint_source} ${recv_zpoolfs}${send_zfs}"
+	fi
     fi
 }
 
