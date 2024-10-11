@@ -1455,7 +1455,11 @@ dump_root_entry () {
 }
 
 dump_swap_entry () {
-    echo "crypt_swap${IDX}            UUID=$(blkid -s UUID -o value ${PDEV}) ${UNLOCKFILE} luks,discard${UNLOCKOPTS}"
+    if [ "${ENCRYPT}" = zfs ] ; then
+        echo "crypt_swap${IDX}            UUID=$(blkid -s UUID -o value ${PDEV}) ${UNLOCKFILE} luks,discard${UNLOCKOPTS}"
+    else
+        echo "crypt_swap${IDX}            UUID=$(blkid -s UUID -o value ${PDEV}) /crypto_keyfile.bin luks"
+    fi
 }
 
 dump_crypttab () {
