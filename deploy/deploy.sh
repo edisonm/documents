@@ -305,15 +305,19 @@ do_make_partitions () {
     # Boot patition:
     if_bootpart \
         sgdisk -n${BOOTSUFF}:0:${BOOTSIZE} -t${BOOTSUFF}:8300 $1
+
     if [ "${SWAP_AT_THE_END}" = 1 ] ; then
         if_swappart \
             sgdisk     -n${SWAPSUFF}:${SWAPSIZE}:0 -t${SWAPSUFF}:8300 $1
-    else
+    fi
+    
+    # Root partition:
+    sgdisk     -n${ROOTSUFF}:0:${ROOTSIZE} -t${ROOTSUFF}:8300 $1
+
+    if [ "${SWAP_AT_THE_END}" != 1 ] ; then
         if_swappart \
             sgdisk     -n${SWAPSUFF}:0:${SWAPSIZE} -t${SWAPSUFF}:8300 $1
     fi
-    # Root partition:
-    sgdisk     -n${ROOTSUFF}:0:${ROOTSIZE} -t${ROOTSUFF}:8300 $1
 }
 
 psep () {
