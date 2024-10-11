@@ -115,7 +115,7 @@ UEFISIZE=+1G
 
 # Boot partition size, empty for no separated boot partition. Compulsory if no
 # zfs and the system doesn't support UEFI
-BOOTSIZE=+2G
+BOOTSIZE=+1G
 
 # boot partition file system to be used
 # BOOTFS=ext4
@@ -136,6 +136,8 @@ ROOTFS=zfs
 # to be equal to the available RAM memory
 # SWAPSIZE=-8G
 SWAPSIZE=+32G
+
+# SWAP_AT_THE_END=1
 
 # Unit(s) where you will install Debian
 # DISKS=/dev/mmcblk0
@@ -303,9 +305,13 @@ do_make_partitions () {
     # Boot patition:
     if_bootpart \
         sgdisk -n${BOOTSUFF}:0:${BOOTSIZE} -t${BOOTSUFF}:8300 $1
-    # SWAP partition (at the end):
-    if_swappart \
-        sgdisk     -n${SWAPSUFF}:${SWAPSIZE}:0 -t${SWAPSUFF}:8300 $1
+    if [ "${SWAP_AT_THE_END}" = 1 ] ; then
+        if_swappart \
+            sgdisk     -n${SWAPSUFF}:${SWAPSIZE}:0 -t${SWAPSUFF}:8300 $1
+    else
+        if_swappart \
+            sgdisk     -n${SWAPSUFF}:0:${SWAPSIZE} -t${SWAPSUFF}:8300 $1
+    fi
     # Root partition:
     sgdisk     -n${ROOTSUFF}:0:${ROOTSIZE} -t${ROOTSUFF}:8300 $1
 }
