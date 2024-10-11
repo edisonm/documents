@@ -22,7 +22,7 @@
 # Machine specific configuration:
 USERNAME=admin
 FULLNAME="Administrative Account"
-DESTNAME=dedison2
+DESTNAME=jove
 
 # Distributon.
 DISTRO=debian
@@ -41,12 +41,12 @@ VERSNAME=bookworm
 # Leave it emtpy to skip proxmox installation.
 
 # PROXMOX=
-# PROXMOX=full
-PROXMOX=boot
+PROXMOX=full
+# PROXMOX=boot
 
 # APT Cache Server, leave it empty to disable:
-APTCACHER=10.8.0.1
-# APTCACHER=192.168.1.6
+# APTCACHER=10.8.0.1
+APTCACHER=192.168.1.6
 
 # Specifies if the machine is encrypted.  In an enterprise environment always
 # choose luks, since zfs only encrypts the file content but not the structure.
@@ -90,10 +90,13 @@ DEBPACKS="ntp acl binutils build-essential openssh-server"
 # DEBPACKS+=" acpid alsa-utils anacron fcitx libreoffice"
 
 # Disk layout:
-DISKLAYOUT=singboot
+# DISKLAYOUT=singboot
 # DISKLAYOUT=raid0
 # DISKLAYOUT=raid1
 # DISKLAYOUT=raid10
+DISKLAYOUT=raidz
+# DISKLAYOUT=raidz2
+# DISKLAYOUT=raidz3
 
 # Start at 3, similar to singboot without redefined bios and uefi partitons
 # DISKLAYOUT=dualboot
@@ -112,7 +115,7 @@ UEFISIZE=+1G
 
 # Boot partition size, empty for no separated boot partition. Compulsory if no
 # zfs and the system doesn't support UEFI
-# BOOTSIZE=+2G
+BOOTSIZE=+2G
 
 # boot partition file system to be used
 # BOOTFS=ext4
@@ -120,31 +123,32 @@ UEFISIZE=+1G
 BOOTFS=zfs
 
 # Root partition size, 0 for max available space, minimum ~20GB
-ROOTSIZE=0
+ROOTSIZE=+32G
 # ROOTSIZE=+32G
 # ROOTSIZE=+64G
 
 # root partition file system to be used
-# BOOTFS=ext4
+# ROOTFS=ext4
 # ROOTFS=btrfs
 ROOTFS=zfs
 
 # Swap partition size, placed at the end, empty for no swap, it is recommended
 # to be equal to the available RAM memory
-SWAPSIZE=-8G
-# SWAPSIZE=-16G
+# SWAPSIZE=-8G
+SWAPSIZE=+32G
 
 # Unit(s) where you will install Debian
 # DISKS=/dev/mmcblk0
 # DISKS=/dev/nvme0n1
 # DISKS=/dev/vda
-DISKS=/dev/sda
+# DISKS=/dev/sda
 # DISKS=/dev/sdb
 # Units for raid1/raid0:
 # DISKS="/dev/vda /dev/vdb"
 # Units for raid10:
 # DISKS="/dev/sda /dev/sdb /dev/sdc /dev/sdd"
 # DISKS="/dev/vda /dev/vdb /dev/vdc /dev/vdd"
+DISKS="/dev/nvme0n1 /dev/nvme1n1 /dev/nvme2n1"
 
 # Enable if you are attempting to continue an incomplete installation
 # RESUMING=yes
@@ -314,7 +318,11 @@ psep () {
 }
 
 if_raid () {
-    if [ "${DISKLAYOUT}" == raid1 ] || [ "${DISKLAYOUT}" == raid10 ] ; then
+    if [ "${DISKLAYOUT}" == raid1 ] \
+	   || [ "${DISKLAYOUT}" == raid10 ] \
+	   || [ "${DISKLAYOUT}" == raidz  ] \
+	   || [ "${DISKLAYOUT}" == raidz2 ] \
+	   || [ "${DISKLAYOUT}" == raidz3 ]; then
         $*
     fi
 }
@@ -464,6 +472,18 @@ setenv_raid1 () {
 }
 
 setenv_raid10 () {
+    setenv_common
+}
+
+setenv_raidz () {
+    setenv_common
+}
+
+setenv_raidz2 () {
+    setenv_common
+}
+
+setenv_raidz3 () {
     setenv_common
 }
 
@@ -652,6 +672,18 @@ create_partitions_raid10 () {
     create_partitions_raid
 }
 
+create_partitions_raidz () {
+    create_partitions_raid
+}
+
+create_partitions_raidz2 () {
+    create_partitions_raid
+}
+
+create_partitions_raidz3 () {
+    create_partitions_raid
+}
+
 open_rootpart () {
     printf "%s" "$KEY_"|cryptsetup luksOpen --key-file - ${PDEV} crypt_root${IDX}
 }
@@ -707,6 +739,12 @@ zfs_layout () {
         echo mirror $*
     elif [ "${DISKLAYOUT}" == raid10 ] ; then
         zfs_raid10_layout $*
+    elif [ "${DISKLAYOUT}" == raidz ] ; then
+	echo raidz $*
+    elif [ "${DISKLAYOUT}" == raidz2 ] ; then
+	echo raidz2 $*
+    elif [ "${DISKLAYOUT}" == raidz3 ] ; then
+	echo raidz3 $*
     else
         echo $*
     fi
@@ -1580,6 +1618,8 @@ show_settings () {
     echo BOOTPARTS=${BOOTPARTS}
     echo ROOTPDEVS=${ROOTPDEVS}
     echo ROOTPARTS=${ROOTPARTS}
+    echo SWAPPDEVS=${SWAPPDEVS}
+    echo SWAPPARTS=${SWAPPARTS}
     echo "Boot Mode: "`if_else_uefi "echo UEFI" "echo BIOS"`
 }
 
@@ -1715,7 +1755,7 @@ prepare_partitions () {
     fi
     apt update
     if_zfs check_prereq
-    apt install --yes cryptsetup
+    if_encrypt apt install --yes cryptsetup
     show_settings
     warn_confirm
     if_else_resuming \
