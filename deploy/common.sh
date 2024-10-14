@@ -143,7 +143,7 @@ config_instpacks_proxmox_full () {
 }
 
 config_instpacks_proxmox () {
-    INIPACKS+=" systemd-boot proxmox-kernel-6.5 proxmox-kernel-helper"
+    INIPACKS+=" systemd-boot proxmox-kernel-6.8 proxmox-kernel-helper"
     config_instpacks_proxmox_${PROXMOX}
 }
 
