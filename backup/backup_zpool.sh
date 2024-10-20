@@ -181,12 +181,15 @@ show_import_volume_zpool () {
     fi
 }
 
-media_export_zpool () {
+media_dellog_zpool () {
     for zlog in ${zlogs[${mediahost},${media_pool}]} ; do
         if ${media_ssh} zpool status ${media_pool} | grep -q ${zlog} ; then
             dryer ${media_ssh} zpool remove ${media_pool} crbackup_${zlog}
         fi
     done
+}
+
+media_export_zpool () {
     dryer ${media_ssh} zpool export ${media_pool}
 }
 

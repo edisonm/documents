@@ -847,6 +847,7 @@ disconnect_medias () {
 }
 
 media_export () {
+    media_dellog_${fstype}
     media_export_${fstype}
 }
 
