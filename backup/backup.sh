@@ -160,6 +160,15 @@ ssh_host () {
     fi
 }
 
+# always use ssh, to avoid odd behaviors
+always_ssh_host () {
+    if [ "$1" = "" ] ; then
+        echo "ssh ${hostname}"
+    else
+        echo "ssh $1"
+    fi
+}
+
 list_backjobs () {
     for backjobrow in ${backjobs} ; do
         echo "${backjobrow}"
@@ -223,8 +232,8 @@ media_host_pool () {
 }
 
 media_host_pools () {
-    fstype=${1}
-    forall_mediahosts \
+    forall_fstype \
+        forall_mediahosts \
         forall_medias \
         media_host_pool
 }
@@ -540,6 +549,34 @@ set_send_hostpoolsfs () {
     $*
 }
 
+declare -A units
+units[0]=""
+units[1]="K"
+units[2]="M"
+units[3]="G"
+units[4]="T"
+units[5]="E"
+
+byteconv_rec () {
+    value=$1
+    vunit=$2
+    if [ $((${value}>1024000)) != 0 ] && [ ${vunit} != 6 ] ; then
+        vunit=$((${vunit}+1))
+        value=$(((${value}+512)/1024))
+        byteconv_rec $value $vunit
+    else
+        ipart=$((${value}/1000))
+        fpart=`printf "%03g" $((${value}%1000))`
+        printf "%.3g%s\n" ${ipart}.${fpart} ${units[${vunit}]}
+    fi
+}
+
+byteconv () {
+    if [ "${1}" != "" ] ; then
+        byteconv_rec $((${1}*1000)) 0
+    fi
+}
+
 statistics () {
     total_size=0
     field1_maxw=6
@@ -587,7 +624,7 @@ statistics () {
     for send_hostpoolfs in ${!send_hosts[*]} ; do
         printf "%-*s" ${field1_maxw} ${send_hostpoolfs}
         for recv_hostpool in ${!recv_hosts[*]} ; do
-            printf " %*s" ${width[${recv_hostpool}]} "${send_recv[${send_hostpoolfs},${recv_hostpool}]}"
+            printf " %*s" ${width[${recv_hostpool}]} "`byteconv ${send_recv[${send_hostpoolfs},${recv_hostpool}]}`"
             if [ "${send_recv[${send_hostpoolfs},${recv_hostpool}]}" != "-" ] ; then
                 recv_stot[${recv_hostpool}]=$((${send_recv[${send_hostpoolfs},${recv_hostpool}]}+${recv_stot[${recv_hostpool}]}))
             fi
@@ -604,14 +641,14 @@ statistics () {
 
     printf "%-*s" ${field1_maxw} "Total"
     for recv_hostpool in ${!recv_hosts[*]} ; do
-        printf " %*s" ${width[${recv_hostpool}]} "${recv_stot[${recv_hostpool}]}"
+        printf " %*s" ${width[${recv_hostpool}]} "`byteconv ${recv_stot[${recv_hostpool}]}`"
     done
     printf "\n"
 
     overflow=0
     printf "%-*s" ${field1_maxw} "Free"
     for recv_hostpool in ${!recv_hosts[*]} ; do
-        printf " %*s" ${width[${recv_hostpool}]} "${recv_size[${recv_hostpool}]}"
+        printf " %*s" ${width[${recv_hostpool}]} "`byteconv ${recv_size[${recv_hostpool}]}`"
         overflow=$((${overflow} || (${recv_stot[${recv_hostpool}]} > ${recv_size[${recv_hostpool}]})))
     done
     printf "\n"
@@ -651,7 +688,8 @@ zpool_list () {
 
 backup () {
     if [ "`recvsnap|grep ${currsnap}`" = "" ] ; then
-        echo $action ${send_host}:${send_zpoolfs} to ${recv_host}:${recv_zpoolfs}
+        snapshot_size=`snapshot_size`
+        echo "$action ${send_host}:${send_zpoolfs} to ${recv_host}:${recv_zpoolfs} (`byteconv ${snapshot_size}`)"
         backup_${fstype}
     fi
 }
@@ -681,10 +719,22 @@ fixmount () {
     fixmount_${fstype}
 }
 
+bak_info () {
+    bak_info_${fstype}
+}
+
+bak_infos () {
+    forall_fstype \
+        forall_mediahosts \
+        forall_medias \
+        bak_info
+}
+
 fixmounts () {
     prev_unfold=${send_unfold}
     send_unfold=1
     rm -f data/fixmount_*.sh
+    
     forall_zjobs \
         zfs_wrapr \
         skip_eq_sendrecv \
@@ -1178,7 +1228,9 @@ all () {
     backups
     # set canmount=off to avoid filesystems compiting for the same mountpoint:
     offmounts
-    # generate data/fixmount_*.sh to restore the attributes of the filesystem:
+    # generate bak_info dirs in the backup media:
+    bak_infos
+    # generate fixmount_*.sh to restore the attributes of the filesystem:
     fixmounts
     backup_log
     show_history

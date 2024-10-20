@@ -32,13 +32,11 @@ zfs_prev_zpool () {
         for send_zpoolfs in ${send_zpoolfss} ; do
             prevsnap=`prevsnap ${prevcmd}`
             sendopts="-R"
-            sizeopts=""
 	    dropopts=""
             send_zfs=${send_zpoolfs##${send_zpool}} $*
         done
     else
         sendopts="-R"
-        sizeopts="-R"
 	dropopts="-r"
         $*
     fi
@@ -53,16 +51,24 @@ zfs_create_rec () {
     fi
 }
 
+snapshot_size_zpool () {
+    size="`$send_ssh zfs send -nvPc ${sendopts} ${send_zpoolfs}@${snprefix}${currsnap} 2>/dev/null | grep size | awk '{print $2}'`"
+    if [ "${size}" = "" ] ; then
+	echo 0
+    else
+	echo ${size}
+    fi
+}
+
 backup_zpool () {
     zfs_create_rec "${recv_zpoolfs}"
-    snapshot_size=`snapshot_size`
     ( ( dryern ${send_ssh} zfs send -c ${sendopts} ${send_zpoolfs}@${snprefix}${currsnap} \
           | dryerpn pv -reps ${snapshot_size} \
           | dryerp ${recv_ssh} zfs recv -d -F ${recv_zpoolfs} ) || true )
 }
 
 # enable in Debian 12:
-# zfssetopts="-u"
+zfssetopts="-u"
 
 offmount_zpool () {
     send_canmount_value="`${send_ssh} zfs get -H -o value canmount ${send_zpoolfs} 2>/dev/null`"
@@ -99,23 +105,35 @@ offmount_zpool () {
     fi
 }
 
+info_dir=__bak_info__
+
+bak_info_zpool () {
+    has_meta_info_fs="`${media_ssh} zfs list -Ho name ${media_pool}/${info_dir} 2>/dev/null || true`"
+    if [ "${has_meta_info_fs}" = "" ] ; then
+        dryer ${media_ssh} zfs create ${media_pool}/${info_dir} -o canmount=on -o mountpoint=/${info_dir}
+    else
+        dryer ${media_ssh} rm -f "/mnt/${media_pool}/${info_dir}/fixmount_*.sh"
+    fi
+}
+
 fixmount_zpool () {
     send_canmount_value="`${send_ssh} zfs get -H -o value canmount ${send_zpoolfs} 2>/dev/null`"
     recv_canmount_value="`${recv_ssh} zfs get -H -o value canmount ${recv_zpoolfs}${send_zfs} 2>/dev/null || true`"
-    fixmount_file="data/fixmount_${send_host}_${recv_zpool}.sh"
+    fixmount_file="/mnt/${recv_zpool}/${info_dir}/fixmount_${send_host}.sh"
+    always_recv_ssh="`always_ssh_host ${recv_host}`"
     if [ "${send_canmount_value}" != "${recv_canmount_value}" ] ; then
-	echo zfs set ${zfssetopts} canmount=${send_canmount_value} ${recv_zpoolfs}${send_zfs} >> "${fixmount_file}"
+	dryer "${always_recv_ssh} echo zfs set ${zfssetopts} canmount=${send_canmount_value} ${recv_zpoolfs}${send_zfs} >> ${fixmount_file}"
     fi
     send_mountpoint_source="`${send_ssh} zfs get -H -o source mountpoint ${send_zpoolfs} 2>/dev/null`"
     recv_mountpoint_source="`${recv_ssh} zfs get -H -o source mountpoint ${recv_zpoolfs}${send_zfs} 2>/dev/null || true`"
     if [ "${send_mountpoint_source}" != "${recv_mountpoint_source}" ] ; then
         if [ "${send_mountpoint_source}" = inherited ] ; then
-            echo zfs inherit mountpoint ${recv_zpoolfs}${send_zfs} >> "${fixmount_file}"
+            dryer "${always_recv_ssh} echo zfs inherit mountpoint ${recv_zpoolfs}${send_zfs} >> ${fixmount_file}"
         else
             send_mountpoint_value="`${send_ssh} zfs get -H -o value mountpoint ${send_zpoolfs} 2>/dev/null`"
             recv_mountpoint_value="`${recv_ssh} zfs get -H -o value mountpoint ${recv_zpoolfs}${send_zfs} 2>/dev/null || true`"
             if [ "${send_mountpoint_value}" != "${recv_mountpoint_value}" ] ; then
-                echo zfs set ${zfssetopts} mountpoint=${send_mountpoint_value} ${recv_zpoolfs}${send_zfs} >> "${fixmount_file}"
+                dryer "${always_recv_ssh} echo zfs set ${zfssetopts} mountpoint=${send_mountpoint_value} ${recv_zpoolfs}${send_zfs} >> ${fixmount_file}"
             fi
         fi
     fi
@@ -123,7 +141,6 @@ fixmount_zpool () {
 
 set_sendopts_zpool () {
     sendopts="${sendopts} -I ${send_zpoolfs}@${snprefix}${prevsnap}"
-    sizeopts="${sizeopts} -I ${send_zpoolfs}@${snprefix}${prevsnap}"
 }
 
 forall_mediapools_zpool () {
@@ -160,15 +177,6 @@ source_mount_zpool () {
 
 source_umount_zpool () {
     true
-}
-
-snapshot_size_zpool () {
-    size="`$send_ssh zfs send -nvPc ${sizeopts} ${send_zpoolfs}@${snprefix}${currsnap} 2>/dev/null | grep size | awk '{print $2}'`"
-    if [ "${size}" = "" ] ; then
-	echo 0
-    else
-	echo ${size}
-    fi
 }
 
 show_import_volume_zpool () {
