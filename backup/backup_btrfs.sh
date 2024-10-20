@@ -176,6 +176,9 @@ media_import_volume_btrfs () {
     ${media_ssh} mount UUID=${uuid} /mnt/btrfs/${label}
 }
 
+media_addlog_volume_btrfs () {
+    true
+}
 
 media_import_line_btrfs () {
     list_bvols "${media_ssh}"

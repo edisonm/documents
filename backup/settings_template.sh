@@ -12,6 +12,14 @@
 
 volumes=""
 
+# Temporary zlogs to speed-up the backup, usually in fixed SSD drives, that is
+# why we can index them by [mediahost,media_pool]
+declare -A zlogs
+
+# Example:
+# zlogs[host2,apool]="3a1857ff-a9d7-42e7-8488-c5ba2cac07d1"
+# zlogs[host2,hpool]="a621b8c2-5845-4b16-844c-b0f304ac1c75"
+
 # hosts to search for removable medias.  This allows a machine to send the
 # backup to a remote receiver where the medias are plugged.
 # Trick: ; means localhost

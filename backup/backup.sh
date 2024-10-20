@@ -181,6 +181,12 @@ list_volumes () {
     done
 }
 
+list_zlogs () {
+    for zlog in ${zlogs[*]} ; do
+        echo ${zlog}
+    done
+}
+
 test_backjobs_loop () {
     echo send_host=${send_host} \
          send_pool=${send_pool} \
@@ -232,8 +238,8 @@ media_host_pool () {
 }
 
 media_host_pools () {
-    forall_fstype \
-        forall_mediahosts \
+    fstype=${1}
+    forall_mediahosts \
         forall_medias \
         media_host_pool
 }
@@ -267,6 +273,12 @@ forall_volumes () {
     while IFS=';' read -r volume ; do
         $* < /dev/null
     done < <(list_volumes)
+}
+
+forall_zlogs () {
+    while IFS=';' read -r volume ; do
+        $* < /dev/null
+    done < <(list_zlogs)
 }
 
 online_mediahosts () {
@@ -773,13 +785,15 @@ connect () {
 connect_medias () {
     forall_volumes \
         crypt_open
+    forall_zlogs \
+        crypt_open
     forall_fstype \
         media_import
 }
 
 mark_already_imported () {
     if [ "${filtered}" = "${media_pool}" ] ; then
-	already_imported=1
+        already_imported=1
     fi
 }
 
@@ -789,10 +803,13 @@ media_import () {
 	    already_imported=0
 	    forall_mediapools_${fstype} mark_already_imported
 	    if [ "${already_imported}" = 0 ] ; then
-		media_import_volume_${fstype} ${filtered}
+                media_pool=${filtered}
+		media_import_volume_${fstype}
 	    fi
 	done < <(forall_volumes show_import_volume_${fstype} ${line}|sort -u)
     done < <(media_import_line_${fstype})
+    
+    forall_mediapools_${fstype} media_addlog_volume_${fstype}
 }
 
 source_mount () {
@@ -823,6 +840,8 @@ disconnect_medias () {
         media_export
     forall_volumes \
         crypt_close
+    forall_zlogs \
+        crypt_close
 }
 
 media_export () {
@@ -840,7 +859,7 @@ set_recv_hostpools () {
 update_log () {
     rsnapshots[${recv_hostpool}]="`( for rsnapshot in ${rsnapshots[${recv_hostpool}]} ; do \
                                        echo ${rsnapshot} ; \
-                                     done ; recvsnap ) |sort -u`"
+                                     done ; recvsnap ) | sort -u`"
 }
 
 recv_volumes () {
@@ -849,7 +868,6 @@ recv_volumes () {
 
 backup_log () {
     zrin=0
-
     unset recv_hosts
     declare -A recv_hosts
     unset recv_pools
@@ -858,11 +876,9 @@ backup_log () {
     declare -A recv_fstype
     unset rsnapshots
     declare -A rsnapshots
-
     forall_zjobs \
         set_recv_hostpools \
         update_log
-    
     for recv_hostpool in ${!recv_hosts[*]} ; do
         recv_ssh=`ssh_host ${recv_hosts[${recv_hostpool}]}`
         recv_zpool=${recv_pools[${recv_hostpool}]}
@@ -1221,21 +1237,28 @@ EOF
 
 all () {
     echo "# Backup began at `date`"
+    echo "# Connecting"
     connect
-    # we should create the snapshots to get statistics right
+    echo "# Taking snapshots to get statistics right"
     hotrun snapshots
+    echo "# Applying retention policy"
     exec_smartretp
+    echo "# Creating backups"
     backups
     # set canmount=off to avoid filesystems compiting for the same mountpoint:
+    echo "# Disabling mounts"
     offmounts
+    echo "# Saving restore scripts"
     # generate bak_info dirs in the backup media:
     bak_infos
     # generate fixmount_*.sh to restore the attributes of the filesystem:
     fixmounts
+    echo "# Logging backup"
     backup_log
+    echo "# Preparing reports"
     show_history
     statistics
-    # dryer waitsecs 5
+    echo "# Disconnecting"
     disconnect
     # dryrun=1 disconnect
     # echo "Note: You must run ./backup.sh disconnect before to remove the media."

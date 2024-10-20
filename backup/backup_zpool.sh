@@ -167,10 +167,6 @@ recv_volumes_zpool () {
         | sed -e s:'crbackup_'::g
 }
 
-media_export_zpool () {
-    dryer ${media_ssh} zpool export ${media_pool}
-}
-
 source_mount_zpool () {
     true
 }
@@ -185,10 +181,26 @@ show_import_volume_zpool () {
     fi
 }
 
+media_export_zpool () {
+    for zlog in ${zlogs[${mediahost},${media_pool}]} ; do
+        if ${media_ssh} zpool status ${media_pool} | grep -q ${zlog} ; then
+            dryer ${media_ssh} zpool remove ${media_pool} crbackup_${zlog}
+        fi
+    done
+    dryer ${media_ssh} zpool export ${media_pool}
+}
+
 media_import_volume_zpool () {
-    imppool=${1}
     # Note: for some reason -N doesn't work properly
-    ${media_ssh} zpool import -N ${imppool} -R /mnt/${imppool}
+    ${media_ssh} zpool import -N ${media_pool} -R /mnt/${media_pool}
+}
+
+media_addlog_volume_zpool () {
+    for zlog in ${zlogs[${mediahost},${media_pool}]} ; do
+        if ! ( ${media_ssh} zpool status ${media_pool} | grep -q ${zlog} ) ; then
+            dryer ${media_ssh} zpool add ${media_pool} log crbackup_${zlog}
+        fi
+    done
 }
 
 get_media_import_line_zpool () {
