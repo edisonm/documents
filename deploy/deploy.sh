@@ -681,7 +681,10 @@ build_bootpart_zfs () {
           -O relatime=on \
           -O canmount=off -O mountpoint=none -R ${ROOTDIR} \
           bpool `zfs_layout ${BOOTPARTS}`
-    zfs create -o canmount=on -o mountpoint=/boot bpool/BOOT
+
+    # Note: The fs addition is to make it compatible with grub, don't remove it
+    zfs create                                    bpool/BOOT
+    zfs create -o canmount=on -o mountpoint=/boot bpool/BOOT/fs
 }
 
 build_rootpart_btrfs () {
@@ -729,22 +732,24 @@ build_rootpart_zfs () {
               -O canmount=off -O mountpoint=none -R ${ROOTDIR} \
               rpool `zfs_layout ${ROOTPARTS}`
 
-    zfs create -o canmount=on  -o mountpoint=/    rpool/ROOT
-    zfs create                                    rpool/ROOT/home
-    zfs create -o canmount=off                    rpool/ROOT/usr
-    zfs create                                    rpool/ROOT/usr/local
-    zfs create -o canmount=off                    rpool/ROOT/var
-    zfs create                                    rpool/ROOT/var/lib
-    zfs create                                    rpool/ROOT/var/lib/apt
-    zfs create                                    rpool/ROOT/var/lib/dpkg
-    zfs create                                    rpool/ROOT/var/lib/AccountsService
-    zfs create                                    rpool/ROOT/var/lib/NetworkManager
-    zfs create                                    rpool/ROOT/var/log
-    zfs create                                    rpool/ROOT/var/spool
+    # Note: The fs addition is to make it compatible with grub, don't remove it
+    zfs create                                    rpool/ROOT
+    zfs create -o canmount=on  -o mountpoint=/    rpool/ROOT/fs
+    zfs create                                    rpool/ROOT/fs/home
+    zfs create -o canmount=off                    rpool/ROOT/fs/usr
+    zfs create                                    rpool/ROOT/fs/usr/local
+    zfs create -o canmount=off                    rpool/ROOT/fs/var
+    zfs create                                    rpool/ROOT/fs/var/lib
+    zfs create                                    rpool/ROOT/fs/var/lib/apt
+    zfs create                                    rpool/ROOT/fs/var/lib/dpkg
+    zfs create                                    rpool/ROOT/fs/var/lib/AccountsService
+    zfs create                                    rpool/ROOT/fs/var/lib/NetworkManager
+    zfs create                                    rpool/ROOT/fs/var/log
+    zfs create                                    rpool/ROOT/fs/var/spool
     if [ "${DISTRO}" == ubuntu ] ; then
-        zfs create                                rpool/ROOT/var/snap
+        zfs create                                rpool/ROOT/fs/var/snap
     fi
-    skip_if_bootpart zfs create                   rpool/ROOT/boot
+    skip_if_bootpart zfs create                   rpool/ROOT/fs/boot
 }
 
 set_btrfs_opts () {
@@ -794,7 +799,7 @@ setup_aptinstall () {
                           > /etc/apt/sources.list
 deb http://deb.debian.org/debian/ <VERSNAME> main contrib <NONFREE>
 deb-src http://deb.debian.org/debian/ <VERSNAME> main contrib <NONFREE>
-# deb [trusted=yes] file:/run/live/medium bookwork main <NONFREE>
+# deb [trusted=yes] file:/run/live/medium <VERSNAME> main <NONFREE>
 EOF
     fi
     # echo "deb http://deb.debian.org/debian ${VERSNAME}-backports main contrib" >> /etc/apt/sources.list
@@ -1516,7 +1521,7 @@ show_settings () {
 }
 
 config_kernel_cmdline () {
-    echo "boot=zfs root=ZFS=rpool/ROOT rw" > /etc/kernel/cmdline
+    echo "boot=zfs root=ZFS=rpool/ROOT/fs rw" > /etc/kernel/cmdline
 }
 
 update_boot_proxmox () {
@@ -1740,7 +1745,7 @@ rescue () {
     if_live \
         setup_aptinstall
     apt update
-    apt install --yes cryptsetup
+    if_encrypt apt install --yes cryptsetup
     ask_key
     config_aptcacher
     open_partitions
