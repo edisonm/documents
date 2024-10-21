@@ -2,6 +2,8 @@
 
 set -e
 
+LC_NUMERIC=C
+
 #   Script for automated backups via zfs and btrfs
 
 #   Author:        Edison Mera
