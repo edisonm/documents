@@ -2,6 +2,7 @@
 USERNAME=admin
 FULLNAME="Administrative Account"
 DESTNAME=debian1
+DOMAIN=localdomain
 
 # Distributon.
 DISTRO=debian
