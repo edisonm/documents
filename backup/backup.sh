@@ -705,6 +705,16 @@ backup () {
         snapshot_size=`snapshot_size`
         echo "$action ${send_host}:${send_zpoolfs} to ${recv_host}:${recv_zpoolfs} (`byteconv ${snapshot_size}`)"
         backup_${fstype}
+	if [ "${send_unfolded}" = 0 ] ; then
+	    for send_zpoolfs in ${send_zpoolfss} ; do
+		# prevsnap=`prevsnap ${prevcmd}`
+		# sendopts="-R"
+		# dropopts=""
+		send_zfs=${send_zpoolfs##${send_zpool}} offmount_${fstype}
+            done
+	else
+	    offmount_${fstype}
+	fi
     fi
 }
 
@@ -1249,8 +1259,7 @@ all () {
     echo "# Creating backups"
     backups
     # set canmount=off to avoid filesystems compiting for the same mountpoint:
-    echo "# Disabling mounts"
-    offmounts
+    # offmounts # note: offmounts integrated in backups to avoid unmount problems
     echo "# Saving restore scripts"
     # generate bak_info dirs in the backup media:
     bak_infos

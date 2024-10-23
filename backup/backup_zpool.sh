@@ -29,6 +29,7 @@ zfs_prev_zpool () {
     send_zpoolfss="`${send_ssh} zfs list -r -Ho name ${send_zpool}${send_zfs}`"
     if [ "${send_unfold}" != "" ] || ( [ "${prevsnap}" != "" ] && [ `requires_unfold ${prevcmd}` = 1 ] ) ; then
         # echo "Note: unfolding -R since some incrementals are incomplete"
+        send_unfolded=1
         for send_zpoolfs in ${send_zpoolfss} ; do
             prevsnap=`prevsnap ${prevcmd}`
             sendopts="-R"
@@ -36,8 +37,9 @@ zfs_prev_zpool () {
             send_zfs=${send_zpoolfs##${send_zpool}} $*
         done
     else
+        send_unfolded=0
         sendopts="-R"
-	dropopts="-r"
+        dropopts="-r"
         $*
     fi
 }
