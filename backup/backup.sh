@@ -76,6 +76,7 @@ LC_NUMERIC=C
 #      ControlPersist 30
 
 . ./settings_`hostname`.sh
+. ./common.sh
 
 hostname=${hostname:-`hostname`}
 
@@ -118,40 +119,6 @@ match_backup_snapshot_minute () {
 
 match_backup_snapshot () {
     match_backup_snapshot_${max_frequency} $*
-}
-
-dryer () {
-    if [ "${dryrun}" = 1 ] ; then
-	echo $*
-    else
-	$*
-    fi
-}
-
-dryern () {
-    if [ "${dryrun}" = 1 ] ; then
-	echo -n $*
-    else
-	$*
-    fi
-}
-
-dryerpn () {
-    if [ "${dryrun}" = 1 ] ; then
-	cat
-	echo -n " | $*"
-    else
-	$*
-    fi
-}
-
-dryerp () {
-    if [ "${dryrun}" = 1 ] ; then
-	cat
-	echo " | $*"
-    else
-	$*
-    fi
 }
 
 ssh_host () {
