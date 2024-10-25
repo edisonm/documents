@@ -603,7 +603,7 @@ close_partitions () {
 
 crypt_partitions () {
     for PDEV in $* ; do
-        printf "%s" "$KEY_"|cryptsetup luksFormat --key-file - ${PDEV}
+        printf "%s" "$KEY_"|cryptsetup luksFormat --sector-size=4096 --key-file - ${PDEV}
     done
 }
 

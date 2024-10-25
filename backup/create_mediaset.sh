@@ -20,19 +20,19 @@ next_id () {
 dryer set_key
 
 IDX="0"
-echo "volumes=\"" > settings_${ZPOOL}.sh
+echo -n "volumes=\"" > settings_${ZPOOL}.sh
 for DISK in ${DISKS} ; do
     # First, wipeout the disks:
     dryer sgdisk -o $DISK
     for PART in ${PARTS} ; do
 	dryer sgdisk -n${PART}:0:${PARTSIZE} -t${PART}:8300 ${DISK}
-	dryern printf "%s" "$KEY_"|dryerp cryptsetup luksFormat --key-file - ${DISK}${PART} 
+	dryern printf "%s" "$KEY_"|dryerp cryptsetup luksFormat --sector-size=4096 --key-file - ${DISK}${PART} 
 	dryern printf "%s" "$KEY_"|dryerp cryptsetup luksAddKey --key-file - ${DISK}${PART} /crypto_keyfile.bin
-	echo "         $(blkid -s UUID -o value ${DISK}${PART}) \\" >> settings_${ZPOOL}.sh
+	echo "$(blkid -s UUID -o value ${DISK}${PART}) \\\n         " >> settings_${ZPOOL}.sh
 	next_id
     done
 done
-echo "       \"" >> settings_${ZPOOL}.sh
+echo "\"" >> settings_${ZPOOL}.sh
 
 IDX="0"
 VOLS=""
