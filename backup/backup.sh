@@ -183,9 +183,9 @@ list_volumes () {
     done
 }
 
-list_zlogs () {
-    for zlog in ${zlogs[*]} ; do
-        echo ${zlog}
+list_caches () {
+    for cache in ${caches[*]} ; do
+        echo ${cache}
     done
 }
 
@@ -277,10 +277,10 @@ forall_volumes () {
     done < <(list_volumes)
 }
 
-forall_zlogs () {
+forall_caches () {
     while IFS=';' read -r volume ; do
         $* < /dev/null
-    done < <(list_zlogs)
+    done < <(list_caches)
 }
 
 online_mediahosts () {
@@ -797,7 +797,7 @@ connect () {
 connect_medias () {
     forall_volumes \
         crypt_open
-    forall_zlogs \
+    forall_caches \
         crypt_open
     forall_fstype \
         media_import
@@ -821,7 +821,7 @@ media_import () {
 	done < <(forall_volumes show_import_volume_${fstype} ${line}|sort -u)
     done < <(media_import_line_${fstype})
     
-    forall_mediapools_${fstype} media_addlog_volume_${fstype}
+    forall_mediapools_${fstype} media_addvol_${fstype}
 }
 
 source_mount () {
@@ -852,12 +852,12 @@ disconnect_medias () {
         media_export
     forall_volumes \
         crypt_close
-    forall_zlogs \
+    forall_caches \
         crypt_close
 }
 
 media_export () {
-    media_dellog_${fstype}
+    media_delvol_${fstype}
     media_export_${fstype}
 }
 

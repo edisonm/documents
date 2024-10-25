@@ -176,7 +176,7 @@ media_import_volume_btrfs () {
     ${media_ssh} mount UUID=${uuid} /mnt/btrfs/${label}
 }
 
-media_addlog_volume_btrfs () {
+media_addvol_btrfs () {
     true
 }
 

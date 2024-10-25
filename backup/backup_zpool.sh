@@ -183,12 +183,23 @@ show_import_volume_zpool () {
     fi
 }
 
-media_dellog_zpool () {
-    for zlog in ${zlogs[${mediahost},${media_pool}]} ; do
-        if ${media_ssh} zpool status ${media_pool} | grep -q ${zlog} ; then
-            dryer ${media_ssh} zpool remove ${media_pool} crbackup_${zlog}
-        fi
+forall_cache () {
+    for cache_type in log cache ; do
+        for cache in ${caches[${mediahost},${media_pool},${cache_type}]} ; do
+            $*
+        done
     done
+}
+
+media_delvol_zpool () {
+    forall_cache \
+        media_delvol_zpool_cache
+}
+
+media_delvol_zpool_cache () {
+    if ${media_ssh} zpool status ${media_pool} | grep -q ${cache} ; then
+        dryer ${media_ssh} zpool remove ${media_pool} crbackup_${cache}
+    fi
 }
 
 media_export_zpool () {
@@ -200,12 +211,15 @@ media_import_volume_zpool () {
     ${media_ssh} zpool import -N ${media_pool} -R /mnt/${media_pool}
 }
 
-media_addlog_volume_zpool () {
-    for zlog in ${zlogs[${mediahost},${media_pool}]} ; do
-        if ! ( ${media_ssh} zpool status ${media_pool} | grep -q ${zlog} ) ; then
-            dryer ${media_ssh} zpool add ${media_pool} log crbackup_${zlog}
-        fi
-    done
+media_addvol_zpool () {
+    forall_cache \
+        media_addvol_zpool_cache
+}
+
+media_addvol_zpool_cache () {
+    if ! ( ${media_ssh} zpool status ${media_pool} | grep -q ${cache} ) ; then
+        dryer ${media_ssh} zpool add ${media_pool} ${cache_type} crbackup_${cache}
+    fi
 }
 
 get_media_import_line_zpool () {
