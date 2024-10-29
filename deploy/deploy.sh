@@ -23,7 +23,7 @@
 
 . `dirname $0`/settings_`hostname`.sh
 
-hostname=${hostname:-`hostname`}
+# hostname=${hostname:-`hostname`}
 
 # Fetch IP address of the first active network interface (excluding loopback)
 IP=$(ip -4 addr show scope global | grep inet | awk '{print $2}' | cut -d/ -f1 | head -n 1)
@@ -778,8 +778,12 @@ build_partitions () {
 }
 
 create_keyfile_luks () {
-    dd if=/dev/urandom bs=512 count=1 of=${ROOTDIR}/crypto_keyfile.bin
-    chmod go-rw ${ROOTDIR}/crypto_keyfile.bin
+    if [ -f ${ROOTDIR}/crypto_keyfile.bin ] ; then
+        echo "WARNING: crypto_keyfile.bin already exists"
+    else
+        dd if=/dev/urandom bs=512 count=1 of=${ROOTDIR}/crypto_keyfile.bin
+        chmod go-rw ${ROOTDIR}/crypto_keyfile.bin
+    fi
 }
 
 create_keyfile_zfs () {
@@ -1517,7 +1521,7 @@ recheck_tpmversion () {
     fi
     if [ "$TPMVERSION" == "2" ] ; then
         # tpm2_clear will remove all TPM keys, but it will make it work --EMM
-        tpm2_clear
+        tpm2_clear || true
         TPMVERSION=`recheck_tpm2`
     fi
 }
@@ -1531,7 +1535,7 @@ config_chroot () {
         if [ -f "${AUTH_KEY}" ] ; then
             cp "${AUTH_KEY}" ${DEPLOYDIR}/
         fi
-        cp deploy.sh common.sh settings_${hostname}.sh ${DEPLOYDIR}/
+        cp deploy.sh common.sh settings_${DESTNAME}.sh ${DEPLOYDIR}/
     fi
 }
 
