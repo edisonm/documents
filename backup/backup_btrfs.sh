@@ -1,6 +1,6 @@
 
 list_bvols () {
-    ${1} lsblk -o fstype,label,uuid,mountpoint|grep 'btrfs'
+    ${1} lsblk -o fstype,label,uuid,mountpoint|grep -v zd|grep 'btrfs'
 }
 
 b_volpath () {
@@ -96,7 +96,7 @@ set_sendopts_btrfs () {
 forall_mediapools_btrfs () {
     while read -r fstype_ media_pool path uuid ; do
         $* < /dev/null
-    done < <(${media_ssh} lsblk -o fstype,label,path,uuid|grep btrfs)
+    done < <(${media_ssh} lsblk -o fstype,label,path,uuid|grep -v zd|grep btrfs)
 }
 
 match_volume () {

@@ -697,7 +697,7 @@ zpool_list () {
     echo "zpool:"
     ( ${media_ssh} zpool list ) || true
     echo "btrfs:"
-    ( ${media_ssh} lsblk -f|grep btrfs ) || true
+    ( ${media_ssh} lsblk -f|grep -v zd|grep btrfs ) || true
 }
 
 backup () {

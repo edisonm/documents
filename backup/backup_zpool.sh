@@ -208,7 +208,7 @@ media_export_zpool () {
 
 media_import_volume_zpool () {
     # Note: for some reason -N doesn't work properly
-    ${media_ssh} zpool import -f -N ${media_pool} -R /mnt/${media_pool}
+    ${media_ssh} zpool import -f ${media_pool} -R /mnt/${media_pool}
 }
 
 media_addvol_zpool () {
@@ -224,7 +224,7 @@ media_addvol_zpool_cache () {
 
 get_media_import_line_zpool () {
     zopts="`for device in $(${media_ssh} ls /dev/mapper|grep crbackup_) ; do echo -d /dev/mapper/${device} ; done`"
-    echo `${media_ssh} zpool import -f ${zopts} 2>/dev/null`|sed 's/.pool:/\npool:/g'
+    echo `${media_ssh} zpool import ${zopts} 2>/dev/null`|sed 's/.pool:/\npool:/g'
 }
 
 cache_command () {
