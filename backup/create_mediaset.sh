@@ -2,8 +2,12 @@
 
 DISKS="/dev/sda /dev/sdb /dev/sdc"
 ZPOOL="set2"
-PARTS="1 2"
-PARTSIZE=+4883735550
+# PARTS="1 2"
+# PARTSIZE=+4883735552
+# ZOPTS= raidz1
+
+PARTS="1"
+PARTSIZE=+9767473112
 
 dryrun=0
 
@@ -20,7 +24,7 @@ next_id () {
 dryer set_key
 
 IDX="0"
-echo -n "volumes=\"" > settings_${ZPOOL}.sh
+echo -en "volumes=\"" > settings_${ZPOOL}.sh
 for DISK in ${DISKS} ; do
     # First, wipeout the disks:
     dryer sgdisk -o $DISK
@@ -28,11 +32,11 @@ for DISK in ${DISKS} ; do
 	dryer sgdisk -n${PART}:0:${PARTSIZE} -t${PART}:8300 ${DISK}
 	dryern printf "%s" "$KEY_"|dryerp cryptsetup luksFormat --sector-size=4096 --key-file - ${DISK}${PART} 
 	dryern printf "%s" "$KEY_"|dryerp cryptsetup luksAddKey --key-file - ${DISK}${PART} /crypto_keyfile.bin
-	echo "$(blkid -s UUID -o value ${DISK}${PART}) \\\n         " >> settings_${ZPOOL}.sh
+	echo -en "$(blkid -s UUID -o value ${DISK}${PART}) \\\n         " >> settings_${ZPOOL}.sh
 	next_id
     done
 done
-echo "\"" >> settings_${ZPOOL}.sh
+echo -e "\"" >> settings_${ZPOOL}.sh
 
 IDX="0"
 VOLS=""
@@ -45,4 +49,4 @@ for DISK in ${DISKS} ; do
     done
 done
 
-dryer zpool create -o ashift=12 -o autotrim=on -O acltype=posixacl -O xattr=sa -O dnodesize=auto -O compression=on -O normalization=formD -O relatime=on -O canmount=off -O mountpoint=none -R /mnt ${ZPOOL} raidz1 ${VOLS}
+dryer zpool create -o ashift=12 -o autotrim=on -O acltype=posixacl -O xattr=sa -O dnodesize=auto -O compression=on -O normalization=formD -O relatime=on -O canmount=off -O mountpoint=none -R /mnt ${ZPOOL} ${ZOPTS} ${VOLS}
