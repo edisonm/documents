@@ -12,6 +12,13 @@
 
 volumes=""
 
+# Format of the receiving media Pool:Format, where Pool is the media pool
+# and Format can be:
+# - clone: The same filesystem of the source (default).
+# - zdump: A raw file containing the output of zfs/btrfs send
+# recvformat="hdump:clone hpool:zdump"
+recvformats=""
+
 # Temporary cache's to speed-up the backup, usually in fixed SSD drives, that is
 # why we can index them by [mediahost,media_pool]
 declare -A caches

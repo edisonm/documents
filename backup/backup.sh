@@ -122,9 +122,16 @@ match_backup_snapshot () {
 }
 
 ssh_host () {
-    if [ "$1" != "" ] \
-           && [ "$1" != "${hostname}" ] \
-           && [ "$1" != localhost ] ; then
+    # using ssh always, to simplify the script:
+    
+    # if [ "$1" != "" ] \
+    #        && [ "$1" != "${hostname}" ] \
+    #        && [ "$1" != localhost ] ; then
+    #     echo "ssh $1"
+    # fi
+    if [ "$1" = "" ] ; then
+        echo "ssh ${hostname}"
+    else
         echo "ssh $1"
     fi
 }
@@ -215,13 +222,24 @@ media_host_pools () {
 
 declare -A media_host_pools
 
+recv_fmt () {
+    recv_fmt=clone
+    for media_recv_fmt in ${recvformats} ; do
+        if [ "${1}:zdump" = "${media_recv_fmt}" ] ; then
+            recv_fmt=zdump
+        fi
+    done
+    echo ${recv_fmt}
+}
+
 forall_recv () {
     if [ "${recv_pool}" = "" ] || [ "${recv_host}" = "" ] ; then
         media_host_pools[${fstype}]="${media_host_pools[${fstype}]:-`media_host_pools ${fstype}`}"
         for recv_host_pool in ${media_host_pools[${fstype}]} ; do
             recv_host=${recv_host_pool%:*}
 	    recv_pool=${recv_host_pool##*:}
-            recv_zpool=${recv_host_pool##*:}
+            recv_zpool=${recv_pool}
+            recv_fmt=`recv_fmt ${recv_zpool}`
             recv_zpoolfs=${recv_zpool}${recv_zfs}
             recv_ssh="`ssh_host ${recv_host}`"
             if [ "`avail_ssh ${recv_host}`" = 1 ] ; then
@@ -230,6 +248,7 @@ forall_recv () {
         done
     else
         recv_zpool=${recv_pool}
+        recv_fmt=`recv_fmt ${recv_zpool}`
 	recv_zpoolfs=${recv_zpool}${recv_zfs}
         recv_ssh="`ssh_host ${recv_host}`"
         if [ "`avail_ssh ${recv_host}`" = 1 ] ; then
@@ -324,9 +343,18 @@ destroy_send_dropsnap () {
 }
 
 destroy_recv_dropsnap () {
+    destroy_recv_dropsnap_${recv_fmt}
+}
+
+destroy_recv_dropsnap_clone () {
     for dropsnap in $* ; do
         destroy_snapshot "${recv_host}" "${recv_zpool}" "${recv_uuid}" "${recv_zfs}${send_zfs}" "${snprefix}${dropsnap}"
     done
+}
+
+destroy_recv_dropsnap_zdump () {
+    # The snapshosts must be dropped when created, bo avoid incompleteness
+    true
 }
 
 dropsnaps () {
@@ -671,16 +699,16 @@ backup () {
     if [ "`recvsnap|grep ${currsnap}`" = "" ] ; then
         snapshot_size=`snapshot_size`
         echo "$action ${send_host}:${send_zpoolfs} to ${recv_host}:${recv_zpoolfs} (`byteconv ${snapshot_size}`)"
-        backup_${fstype}
+        backup_${fstype}_${recv_fmt}
 	if [ "${send_unfolded}" = 0 ] ; then
 	    for send_zpoolfs in ${send_zpoolfss} ; do
 		# prevsnap=`prevsnap ${prevcmd}`
 		# sendopts="-R"
 		# dropopts=""
-		send_zfs=${send_zpoolfs##${send_zpool}} offmount_${fstype}
+		send_zfs=${send_zpoolfs##${send_zpool}} offmount_${fstype}_${recv_fmt}
             done
 	else
-	    offmount_${fstype}
+	    offmount_${fstype}_${recv_fmt}
 	fi
     fi
 }
@@ -707,11 +735,11 @@ offmounts () {
 }
 
 fixmount () {
-    fixmount_${fstype}
+    fixmount_${fstype}_${recv_fmt}
 }
 
 bak_info () {
-    bak_info_${fstype}
+    bak_info_${fstype}_${recv_fmt}
 }
 
 bak_infos () {
@@ -724,8 +752,6 @@ bak_infos () {
 fixmounts () {
     prev_unfold=${send_unfold}
     send_unfold=1
-    rm -f data/fixmount_*.sh
-    
     forall_zjobs \
         zfs_wrapr \
         skip_eq_sendrecv \

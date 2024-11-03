@@ -20,8 +20,17 @@ sendsnap0_zpool () {
 }
 
 recvsnap0_zpool () {
+    recvsnap0_zpool_${recv_fmt}
+}
+
+recvsnap0_zpool_clone () {
     ${recv_ssh} zfs list -Ht snapshot -o name ${recv_zpoolfs}${send_zfs} 2>/dev/null | \
         sed -e "s:${recv_zpoolfs}${send_zfs}@::g" | sort -u
+}
+
+recvsnap0_zpool_zdump () {
+    ${recv_ssh} ls -p /mnt/${media_pool}crbackup/${recv_zpoolfs}${send_zfs} 2>/dev/null | \
+        sed -e 's:.*_\(.*\)\.raw:\1:g' | grep -v /$
 }
 
 zfs_prev_zpool () {
@@ -44,15 +53,6 @@ zfs_prev_zpool () {
     fi
 }
 
-zfs_create_rec () {
-    has_recv_zpoolfs="`${recv_ssh} zfs list -Ho name ${1} 2>/dev/null`" || true
-    if [ "${has_recv_zpoolfs}" = "" ] ; then
-        zfs_create_rec "`dirname ${1}`"
-        dryer ${recv_ssh} zfs create ${1} -o mountpoint=none
-        # TBD: add '-o keyformat=passphrase -o keylocation=file:///crypto_keyfile.bin' if encrypted
-    fi
-}
-
 snapshot_size_zpool () {
     size="`$send_ssh zfs send -nvPc ${sendopts} ${send_zpoolfs}@${snprefix}${currsnap} 2>/dev/null | grep size | awk '{print $2}'`"
     if [ "${size}" = "" ] ; then
@@ -62,17 +62,120 @@ snapshot_size_zpool () {
     fi
 }
 
-backup_zpool () {
-    zfs_create_rec "${recv_zpoolfs}"
-    ( ( dryern ${send_ssh} zfs send -c ${sendopts} ${send_zpoolfs}@${snprefix}${currsnap} \
-          | dryerpn pv -reps ${snapshot_size} \
-          | dryerp ${recv_ssh} zfs recv -d -F ${recv_zpoolfs} ) || true )
+zfs_create_rec_clone () {
+    has_recv_zpoolfs="`${recv_ssh} zfs list -Ho name ${1} 2>/dev/null`" || true
+    if [ "${has_recv_zpoolfs}" = "" ] ; then
+        zfs_create_rec_clone "`dirname ${1}`"
+        dryer ${recv_ssh} zfs create -o mountpoint=none ${1}
+        # TBD: add '-o keyformat=passphrase -o keylocation=file:///crypto_keyfile.bin' if encrypted
+    fi
 }
 
-# enable in Debian 12:
+zfs_create_clone () {
+    zfs_create_rec_clone ${recv_zpoolfs}
+}
+
+zfs_create_zdump () {
+    has_recv_zpoolfs="`${recv_ssh} zfs list -Ho name ${recv_zpool}/BACK 2>/dev/null`" || true
+    if [ "${has_recv_zpoolfs}" = "" ] ; then
+        dryer ${recv_ssh} zfs create -o mountpoint=/crbackup -o canmount=on ${recv_zpool}/BACK
+    fi
+    dryer ${recv_ssh} mkdir -p /mnt/${recv_zpool}/crbackup${recv_zfs}${send_zfs}
+}
+
+backup_zpool_clone () {
+    zfs_create_${recv_fmt}
+    ( dryern ${send_ssh} zfs send -c ${sendopts} ${send_zpoolfs}@${snprefix}${currsnap} \
+          | dryerpn pv -reps ${snapshot_size} \
+          | dryerp ${recv_ssh} zfs recv -d -F ${recv_zpoolfs} ) || true
+}
+
+backup_zpool_zdump_full () {
+    backup_zpool_zdump_file_1 ${1}
+    snapshot1=${1}
+    shift
+    for snapshot2 in $* ; do
+        if [ $((${snapshot2}<=${currsnap})) = 1 ] ; then
+            backup_zpool_zdump_file_2 ${snapshot1} ${snapshot2}
+        fi
+        snapshot1=${snapshot2}
+    done
+}
+
+backup_zpool_zdump_incr () {
+    prevsnap=`prevsnap ${prevcmd}`
+    for snapshot2 in $* ; do
+        if [ $(((${prevsnap}<${snapshot2})&&(${snapshot2}<=${currsnap}))) = 1 ] ; then
+            backup_zpool_zdump_file_2 ${snapshot1} ${snapshot2}
+        fi
+        snapshot1=${snapshot2}
+    done
+}
+
+backup_zpool_zdump () {
+    zfs_create_${recv_fmt}
+    for send_zpoolfs in ${send_zpoolfss} ; do
+        recv_dir="/mnt/${recv_zpool}/crbackup${recv_zfs}${send_zpoolfs##${send_zpool}}"
+        ${recv_ssh} mkdir -p ${recv_dir}
+        backup_zpool_zdump_${baktype} `sendsnap`
+    done
+}
+
+snapshot_size_zpool_1 () {
+    size="`${send_ssh} zfs send -nvPc ${send_zpoolfs}@${snprefix}${1} 2>/dev/null | grep size | awk '{print $2}'`"
+    if [ "${size}" = "" ] ; then
+	echo 0
+    else
+	echo ${size}
+    fi
+}
+
+backup_zpool_zdump_file_1 () {
+    recv_file="${recv_dir}/full_${1}.raw"
+    if ! ${recv_ssh} test -f ${recv_file} ; then
+        cleanupfiles="`${recv_ssh} find ${recv_dir} -name 'full_*.raw' 2>/dev/null || true`"
+        snapshot_size="`snapshot_size_zpool_1 ${1}`"
+        echo "# Saving ${recv_file} (`byteconv ${snapshot_size}`)"
+        ( ( dryern ${send_ssh} zfs send -c ${send_zpoolfs}@${snprefix}${1} \
+                | dryerpn pv -reps ${snapshot_size} \
+                | dryerp ${recv_ssh} "( cat > ${recv_file}-partial ) && mv ${recv_file}-partial ${recv_file}" ) && \
+              if [ "${cleanupfiles}" != "" ] ; then dryer ${recv_ssh} rm -f ${cleanupfiles} ; fi \
+            ) || ${recv_ssh} rm -f ${recv_dir}/full_${1}.raw || true
+    fi
+}
+
+snapshot_size_zpool_2 () {
+    size="`${send_ssh} zfs send -nvPc -I ${send_zpoolfs}@${snprefix}${1} ${send_zpoolfs}@${snprefix}${2} 2>/dev/null | grep size | awk '{print $2}'`"
+    if [ "${size}" = "" ] ; then
+	echo 0
+    else
+	echo ${size}
+    fi
+}
+
+backup_zpool_zdump_file_2 () {
+    recv_file="${recv_dir}/incr_${1}_${2}.raw"
+    if ! ${recv_ssh} test -f ${recv_file} ; then
+        cleanupfiles="`${recv_ssh} find ${recv_dir} -name incr_'*'_${2}.raw -o -name incr_${1}_'*'.raw 2>/dev/null || true`"
+        snapshot_size="`snapshot_size_zpool_2 ${1} ${2}`"
+        echo "# Saving ${recv_file} (`byteconv ${snapshot_size}`)"
+        ( ( dryern ${send_ssh} zfs send -c -I \
+                   ${send_zpoolfs}@${snprefix}${1} \
+                   ${send_zpoolfs}@${snprefix}${2} \
+                | dryerpn pv -reps ${snapshot_size} \
+                | dryerp ${recv_ssh} "( cat > ${recv_file}-partial ) && mv ${recv_file}-partial ${recv_file}" ) && \
+              if [ "${cleanupfiles}" != "" ] ; then dryer ${recv_ssh} rm -f ${cleanupfiles} ; fi \
+            ) || true
+    fi
+}
+
 zfssetopts="-u"
 
-offmount_zpool () {
+offmount_zpool_zdump () {
+    true
+}
+
+offmount_zpool_clone () {
     send_canmount_value="`${send_ssh} zfs get -H -o value canmount ${send_zpoolfs} 2>/dev/null`"
     recv_canmount_value="`${recv_ssh} zfs get -H -o value canmount ${recv_zpoolfs}${send_zfs} 2>/dev/null || true`"
 
@@ -109,7 +212,11 @@ offmount_zpool () {
 
 info_dir=__bak_info__
 
-bak_info_zpool () {
+bak_info_zpool_zdump () {
+    true
+}
+
+bak_info_zpool_clone () {
     has_meta_info_fs="`${media_ssh} zfs list -Ho name ${media_pool}/${info_dir} 2>/dev/null || true`"
     if [ "${has_meta_info_fs}" = "" ] ; then
         dryer ${media_ssh} zfs create ${media_pool}/${info_dir} -o canmount=on -o mountpoint=/${info_dir}
@@ -118,7 +225,11 @@ bak_info_zpool () {
     fi
 }
 
-fixmount_zpool () {
+fixmount_zpool_zdump () {
+    true
+}
+
+fixmount_zpool_clone () {
     send_canmount_value="`${send_ssh} zfs get -H -o value canmount ${send_zpoolfs} 2>/dev/null`"
     recv_canmount_value="`${recv_ssh} zfs get -H -o value canmount ${recv_zpoolfs}${send_zfs} 2>/dev/null || true`"
     fixmount_file="/mnt/${recv_zpool}/${info_dir}/fixmount_${send_host}.sh"
@@ -155,6 +266,7 @@ if_removable_media_zpool () {
     if [ "`${media_ssh} zpool status ${media_pool}\
          |grep crbackup_\
          |awk '{print $1}'|sed -e s:'crbackup_'::g`" != "" ] ; then
+        recv_fmt=`recv_fmt ${media_pool}`
         $*
     fi
 }
