@@ -1,3 +1,4 @@
+info_dir=crbackup
 
 snapshot_zpool () {
     snapshot=${send_pool}${send_zfs}@${snprefix}${currsnap}
@@ -29,8 +30,8 @@ recvsnap0_zpool_clone () {
 }
 
 recvsnap0_zpool_zdump () {
-    ${recv_ssh} ls -p /mnt/${media_pool}crbackup/${recv_zpoolfs}${send_zfs} 2>/dev/null | \
-        sed -e 's:.*_\(.*\)\.raw:\1:g' | grep -v /$
+    ${recv_ssh} ls -p /mnt/${recv_pool}/crbackup${recv_zfs}${send_zfs} 2>/dev/null | grep -v /$ | \
+        sed -e 's:.*_\(.*\)\.raw:'${snprefix}'\1:g'
 }
 
 zfs_prev_zpool () {
@@ -112,13 +113,26 @@ backup_zpool_zdump_incr () {
     done
 }
 
+backup_zpool_zdump_1 () {
+    recv_dir="/mnt/${recv_zpool}/crbackup${recv_zfs}${send_zfs}"
+    ${recv_ssh} mkdir -p ${recv_dir}
+    backup_zpool_zdump_${baktype} `sendsnap`
+}
+
 backup_zpool_zdump () {
     zfs_create_${recv_fmt}
-    for send_zpoolfs in ${send_zpoolfss} ; do
-        recv_dir="/mnt/${recv_zpool}/crbackup${recv_zfs}${send_zpoolfs##${send_zpool}}"
-        ${recv_ssh} mkdir -p ${recv_dir}
-        backup_zpool_zdump_${baktype} `sendsnap`
-    done
+    if [ "${send_unfolded}" = 0 ] ; then
+        for send_zpoolfs in ${send_zpoolfss} ; do
+            send_zfs=${send_zpoolfs##${send_zpool}} backup_zpool_zdump_1
+        done
+    else
+        backup_zpool_zdump_1
+    fi
+}
+
+backup_restore_sh_zpool () {
+    nodry echo "restore_job ${send_zpool} ${recv_zfs} ${send_zfs}" \
+        | nodry ${recv_ssh} "cat >> /mnt/${recv_zpool}/crbackup/restore.sh"
 }
 
 snapshot_size_zpool_1 () {
@@ -127,20 +141,6 @@ snapshot_size_zpool_1 () {
 	echo 0
     else
 	echo ${size}
-    fi
-}
-
-backup_zpool_zdump_file_1 () {
-    recv_file="${recv_dir}/full_${1}.raw"
-    if ! ${recv_ssh} test -f ${recv_file} ; then
-        cleanupfiles="`${recv_ssh} find ${recv_dir} -name 'full_*.raw' 2>/dev/null || true`"
-        snapshot_size="`snapshot_size_zpool_1 ${1}`"
-        echo "# Saving ${recv_file} (`byteconv ${snapshot_size}`)"
-        ( ( dryern ${send_ssh} zfs send -c ${send_zpoolfs}@${snprefix}${1} \
-                | dryerpn pv -reps ${snapshot_size} \
-                | dryerp ${recv_ssh} "( cat > ${recv_file}-partial ) && mv ${recv_file}-partial ${recv_file}" ) && \
-              if [ "${cleanupfiles}" != "" ] ; then dryer ${recv_ssh} rm -f ${cleanupfiles} ; fi \
-            ) || ${recv_ssh} rm -f ${recv_dir}/full_${1}.raw || true
     fi
 }
 
@@ -153,18 +153,34 @@ snapshot_size_zpool_2 () {
     fi
 }
 
+# WARNING: Don't change prefixes full/incr, they are tweaked so that full
+# appears first, before incr when using ls to get the raw files, which is
+# required by the restore_job script to work properly.
+
+backup_zpool_zdump_file_1 () {
+    recv_file="${recv_dir}/full_${1}.raw"
+    if ! ${recv_ssh} test -f ${recv_file} ; then
+        snapshot_size="`snapshot_size_zpool_1 ${1}`"
+        nodry echo "# Saving ${recv_file} (`byteconv ${snapshot_size}`)"
+        ( ( dryern ${send_ssh} zfs send -c ${send_zpoolfs}@${snprefix}${1} \
+                | dryerpn pv -reps ${snapshot_size} \
+                | dryerp ${recv_ssh} "( cat > ${recv_file}-partial ) && mv ${recv_file}-partial ${recv_file}" ) \
+              && dryer ${recv_ssh} "rm -f ${recv_dir}/full_*.raw-cleanup ${recv_dir}/incr_*_${1}.raw-cleanup" \
+            ) || true
+    fi
+}
+
 backup_zpool_zdump_file_2 () {
     recv_file="${recv_dir}/incr_${1}_${2}.raw"
     if ! ${recv_ssh} test -f ${recv_file} ; then
-        cleanupfiles="`${recv_ssh} find ${recv_dir} -name incr_'*'_${2}.raw -o -name incr_${1}_'*'.raw 2>/dev/null || true`"
         snapshot_size="`snapshot_size_zpool_2 ${1} ${2}`"
-        echo "# Saving ${recv_file} (`byteconv ${snapshot_size}`)"
+        nodry echo "# Saving ${recv_file} (`byteconv ${snapshot_size}`)"
         ( ( dryern ${send_ssh} zfs send -c -I \
                    ${send_zpoolfs}@${snprefix}${1} \
                    ${send_zpoolfs}@${snprefix}${2} \
                 | dryerpn pv -reps ${snapshot_size} \
-                | dryerp ${recv_ssh} "( cat > ${recv_file}-partial ) && mv ${recv_file}-partial ${recv_file}" ) && \
-              if [ "${cleanupfiles}" != "" ] ; then dryer ${recv_ssh} rm -f ${cleanupfiles} ; fi \
+                | dryerp ${recv_ssh} "( cat > ${recv_file}-partial ) && mv ${recv_file}-partial ${recv_file}" ) \
+              && dryer ${recv_ssh} "rm -f ${recv_dir}/full_*.raw-cleanup ${recv_dir}/incr_*_${1}.raw-cleanup" \
             ) || true
     fi
 }
@@ -210,8 +226,6 @@ offmount_zpool_clone () {
     fi
 }
 
-info_dir=__bak_info__
-
 bak_info_zpool_zdump () {
     true
 }
@@ -233,20 +247,22 @@ fixmount_zpool_clone () {
     send_canmount_value="`${send_ssh} zfs get -H -o value canmount ${send_zpoolfs} 2>/dev/null`"
     recv_canmount_value="`${recv_ssh} zfs get -H -o value canmount ${recv_zpoolfs}${send_zfs} 2>/dev/null || true`"
     fixmount_file="/mnt/${recv_zpool}/${info_dir}/fixmount_${send_host}.sh"
-    always_recv_ssh="`always_ssh_host ${recv_host}`"
     if [ "${send_canmount_value}" != "${recv_canmount_value}" ] ; then
-	dryer "${always_recv_ssh} echo zfs set ${zfssetopts} canmount=${send_canmount_value} ${recv_zpoolfs}${send_zfs} >> ${fixmount_file}"
+        nodry echo "zfs set ${zfssetopts} canmount=${send_canmount_value} ${recv_zpoolfs}${send_zfs}" \
+	    | nodry "${recv_ssh} cat >> ${fixmount_file}"
     fi
     send_mountpoint_source="`${send_ssh} zfs get -H -o source mountpoint ${send_zpoolfs} 2>/dev/null`"
     recv_mountpoint_source="`${recv_ssh} zfs get -H -o source mountpoint ${recv_zpoolfs}${send_zfs} 2>/dev/null || true`"
     if [ "${send_mountpoint_source}" != "${recv_mountpoint_source}" ] ; then
         if [ "${send_mountpoint_source}" = inherited ] ; then
-            dryer "${always_recv_ssh} echo zfs inherit mountpoint ${recv_zpoolfs}${send_zfs} >> ${fixmount_file}"
+            nodry echo "echo zfs inherit mountpoint ${recv_zpoolfs}${send_zfs}" \
+                | nodry "${recv_ssh} cat >> ${fixmount_file}"
         else
             send_mountpoint_value="`${send_ssh} zfs get -H -o value mountpoint ${send_zpoolfs} 2>/dev/null`"
             recv_mountpoint_value="`${recv_ssh} zfs get -H -o value mountpoint ${recv_zpoolfs}${send_zfs} 2>/dev/null || true`"
             if [ "${send_mountpoint_value}" != "${recv_mountpoint_value}" ] ; then
-                dryer "${always_recv_ssh} echo zfs set ${zfssetopts} mountpoint=${send_mountpoint_value} ${recv_zpoolfs}${send_zfs} >> ${fixmount_file}"
+                nodry echo "zfs set ${zfssetopts} mountpoint=${send_mountpoint_value} ${recv_zpoolfs}${send_zfs}" \
+                    | nodry "${recv_ssh} cat >> ${fixmount_file}"
             fi
         fi
     fi

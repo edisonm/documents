@@ -121,23 +121,16 @@ match_backup_snapshot () {
     match_backup_snapshot_${max_frequency} $*
 }
 
-ssh_host () {
-    # using ssh always, to simplify the script:
-    
-    # if [ "$1" != "" ] \
-    #        && [ "$1" != "${hostname}" ] \
-    #        && [ "$1" != localhost ] ; then
-    #     echo "ssh $1"
-    # fi
-    if [ "$1" = "" ] ; then
-        echo "ssh ${hostname}"
-    else
-        echo "ssh $1"
-    fi
-}
+# ssh_host () {
+#     if [ "$1" != "" ] \
+#            && [ "$1" != "${hostname}" ] \
+#            && [ "$1" != localhost ] ; then
+#         echo "ssh $1"
+#     fi
+# }
 
 # always use ssh, to avoid odd behaviors
-always_ssh_host () {
+ssh_host () {
     if [ "$1" = "" ] ; then
         echo "ssh ${hostname}"
     else
@@ -177,6 +170,7 @@ test_backjobs_loop () {
 test_backjobs () {
     forall_backjobs \
         forall_recv \
+        zfs_prev sendsnap \
         test_backjobs_loop
 }
 
@@ -342,10 +336,6 @@ destroy_send_dropsnap () {
     done
 }
 
-destroy_recv_dropsnap () {
-    destroy_recv_dropsnap_${recv_fmt}
-}
-
 destroy_recv_dropsnap_clone () {
     for dropsnap in $* ; do
         destroy_snapshot "${recv_host}" "${recv_zpool}" "${recv_uuid}" "${recv_zfs}${send_zfs}" "${snprefix}${dropsnap}"
@@ -353,8 +343,22 @@ destroy_recv_dropsnap_clone () {
 }
 
 destroy_recv_dropsnap_zdump () {
-    # The snapshosts must be dropped when created, bo avoid incompleteness
-    true
+    # The snapshosts must be dropped when created, bo avoid incompleteness, so
+    # we only mark them wit the -cleanup extension
+    recv_dir="/mnt/${recv_zpool}/crbackup${recv_zfs}${send_zfs}"
+    for dropsnap in $* ; do
+        recv_ssh="`ssh_host ${recv_host}`"
+        dropfiles=$(${recv_ssh} find ${recv_dir} -name full_${dropsnap}.raw \
+                                -o -name incr_${dropsnap}_"'*'".raw \
+                                -o -name incr_"'*'"_${dropsnap}.raw)
+        for dropfile in ${dropfiles} ; do
+            dryer ${recv_ssh} " mv ${dropfile} ${dropfile}-cleanup"
+        done
+    done
+}
+
+destroy_recv_dropsnap_top () {
+    destroy_recv_dropsnap_top_${recv_fmt} $*
 }
 
 dropsnaps () {
@@ -368,6 +372,10 @@ dropsnaps () {
     forall_backjobs \
         forall_recv \
         destroy_recv_dropsnap ${dropsnaps}
+}
+
+destroy_recv_dropsnap () {
+    destroy_recv_dropsnap_${recv_fmt} $*
 }
 
 exec_smartretp () {
@@ -390,16 +398,29 @@ destroy_send_recv_smartretp () {
 }
 
 destroy_recv_smartretp () {
+    destroy_recv_smartretp_${recv_fmt}
+}
+
+destroy_recv_smartretp_zdump () {
+    destroy_recv_smartretp_top
+}
+
+destroy_recv_smartretp_clone () {
+    # zfs destroy supports recursion, so we don't do the recursion ourselves
+    destroy_recv_smartretp_top
+}
+
+destroy_recv_smartretp_top () {
     # Next command means: don't delete prevsnap, currsnap, and last 2
     recvsnap="`recvsnap|head -n -2`"
     # Next command means: don't delete last 2 dropables
-    recv_dropsnaps=`smartretp "${recvsnap}"|head -n -2`
+    recv_dropsnaps=`smartretp ${recvsnap}|head -n -2`
     destroy_recv_dropsnap ${recv_dropsnaps} ${dropsnaps}
 }
 
 destroy_send_smartretp () {
     sendsnap="`sendsnap|head -n -2`"
-    send_dropsnaps=`smartretp "${sendsnap}"|head -n -2`
+    send_dropsnaps=`smartretp ${sendsnap}|head -n -2`
     destroy_send_dropsnap ${send_dropsnaps} ${dropsnaps}
 }
 
@@ -713,6 +734,12 @@ backup () {
     fi
 }
 
+restore_sh () {
+    # echo "recording commands to restore ${send_host}:${send_zpoolfs} from ${recv_host}:${recv_zpoolfs}"
+    baktype=full
+    backup_restore_sh_${fstype}
+}
+
 backups () {
     forall_zjobs \
         zfs_wrapr \
@@ -725,13 +752,11 @@ offmount () {
 }
 
 offmounts () {
-    prev_unfold=${send_unfold}
-    send_unfold=1
-    forall_zjobs \
+    send_unfold=1 \
+        forall_zjobs \
         zfs_wrapr \
         skip_eq_sendrecv \
         offmount
-    send_unfold=${prev_unfold}
 }
 
 fixmount () {
@@ -747,6 +772,65 @@ bak_infos () {
         forall_mediahosts \
         forall_medias \
         bak_info
+}
+
+restores () {
+    forall_fstype \
+        forall_mediahosts \
+        forall_medias \
+        cleanup_restore
+    
+    forall_backjobs \
+        forall_recv \
+        restore_sh
+}
+
+cleanup_restore () {
+    media_fmt=`recv_fmt ${media_pool}`
+    cleanup_restore_${media_fmt}
+}
+
+cleanup_restore_clone () {
+    cat <<EOF | ${media_ssh} "cat > /mnt/${media_pool}/crbackup/restore.sh"
+#!/bin/bash
+
+currsnap="${currsnap}"
+recv_zpool=${media_pool}
+
+restore_job () {
+    rest_zpool="\${1}"
+    recv_zfs="\${2}"
+    send_zfs="\${3}"
+    back_zfs="\${recv_zpool}\${recv_zfs}\${send_zfs}"
+    back_size="\`(zfs send -nvPcR \${back_zfs}@${snprefix}\${currsnap} 2>/dev/null | grep size | awk '{print $2}')||echo 0\`"
+    zfs send -Rc \${back_zfs}@${snprefix}\${currsnap} | pv -pers \${back_size} | zfs recv -d -F \${rest_zpool}\${send_zfs}
+}
+
+EOF
+}
+
+cleanup_restore_zdump () {
+    cat <<EOF | ${media_ssh} "cat > /mnt/${media_pool}/crbackup/restore.sh"
+#!/bin/bash
+
+currsnap="${currsnap}"
+recv_zpool=${media_pool}
+
+restore_job () {
+    rest_zpool="\${1}"
+    recv_zfs="\${2}"
+    send_zfs="\${3}"
+    back_dir="/mnt/\${recv_zpool}/crbackup\${recv_zfs}\${send_zfs}"
+    back_size="\`stat -c '%s' \${back_dir}/\${recv_file}\`"
+    for recv_file in \`cd \${back_dir} ; ls *.raw\` ; do
+        cat \${back_dir}/\${recv_file} | pv -pers \${back_size} | zfs recv -d -F \${rest_zpool}\${send_zfs} ;
+    done
+    for recv_sdir in \`cd \${back_dir} ; ls -p | grep /$ | sed 's:/$::g'\` ; do
+        ( restore_job \${rest_zpool} \${recv_zfs} \${send_zfs}/\${recv_sdir} )
+    done
+}
+
+EOF
 }
 
 fixmounts () {
@@ -1182,7 +1266,7 @@ declare -A per_y
 
 smartretp () {
     curr_timestamp=`date '+%s'`
-    for snapshot in $1 ; do
+    for snapshot in $* ; do
         # yymmddHHMM
         yy=${snapshot%[0-9][0-9][0-9][0-9][0-9][0-9]}
         mmddHH=${snapshot##[0-9][0-9]}
@@ -1254,6 +1338,7 @@ all () {
     # set canmount=off to avoid filesystems compiting for the same mountpoint:
     # offmounts # note: offmounts integrated in backups to avoid unmount problems
     echo "# Saving restore scripts"
+    restores
     # generate bak_info dirs in the backup media:
     bak_infos
     # generate fixmount_*.sh to restore the attributes of the filesystem:
@@ -1298,3 +1383,4 @@ main () {
 }
 
 main $*
+# smartretp 24100219 24100707 24101519 24102120 24102820 24102919 24103007 24103119 24110119 24110207 24110301 24110320 24110321 24110400 24110407 24110423

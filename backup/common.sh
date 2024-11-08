@@ -25,6 +25,18 @@ dryer () {
     fi
 }
 
+nodry () {
+    if [ "${dryrun}" != 1 ] ; then
+	$*
+    fi
+}
+
+ifdry () {
+    if [ "${dryrun}" = 1 ] ; then
+	$*
+    fi
+}
+
 dryern () {
     if [ "${dryrun}" = 1 ] ; then
 	echo -n $*
