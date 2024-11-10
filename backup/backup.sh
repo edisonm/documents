@@ -411,16 +411,16 @@ destroy_recv_smartretp_clone () {
 }
 
 destroy_recv_smartretp_top () {
-    # Next command means: don't delete prevsnap, currsnap, and last 2
-    recvsnap="`recvsnap|head -n -2`"
-    # Next command means: don't delete last 2 dropables
-    recv_dropsnaps=`smartretp ${recvsnap}|head -n -2`
+    # Next command means: keep initsnap, prevsnap, currsnap, and last 2.
+    # initsnap must be kept to avoid a full backup in case it is removed.
+    recvsnap="`recvsnap|tail -n +2|head -n -2`"
+    recv_dropsnaps=`smartretp ${recvsnap}`
     destroy_recv_dropsnap ${recv_dropsnaps} ${dropsnaps}
 }
 
 destroy_send_smartretp () {
-    sendsnap="`sendsnap|head -n -2`"
-    send_dropsnaps=`smartretp ${sendsnap}|head -n -2`
+    sendsnap="`sendsnap|tail -n +2|head -n -2`"
+    send_dropsnaps=`smartretp ${sendsnap}`
     destroy_send_dropsnap ${send_dropsnaps} ${dropsnaps}
 }
 
