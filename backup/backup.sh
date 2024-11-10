@@ -386,15 +386,14 @@ exec_smartretp () {
 }
 
 destroy_send_recv_smartretp () {
-    prev_unfold=${send_unfold}
-    send_unfold=1
-    zfs_prev \
+    send_unfold=1 \
+        zfs_prev \
         sendsnap \
         destroy_send_smartretp
 
-    forall_recv \
+    send_unfold=1 \
+        forall_recv \
         destroy_recv_smartretp
-    send_unfold=${prev_unfold}
 }
 
 destroy_recv_smartretp () {
@@ -579,34 +578,6 @@ set_send_hostpoolsfs () {
     $*
 }
 
-declare -A units
-units[0]=""
-units[1]="K"
-units[2]="M"
-units[3]="G"
-units[4]="T"
-units[5]="E"
-
-byteconv_rec () {
-    value=$1
-    vunit=$2
-    if [ $((${value}>1024000)) != 0 ] && [ ${vunit} != 6 ] ; then
-        vunit=$((${vunit}+1))
-        value=$(((${value}+512)/1024))
-        byteconv_rec $value $vunit
-    else
-        ipart=$((${value}/1000))
-        fpart=`printf "%03g" $((${value}%1000))`
-        printf "%.3g%s\n" ${ipart}.${fpart} ${units[${vunit}]}
-    fi
-}
-
-byteconv () {
-    if [ "${1}" != "" ] ; then
-        byteconv_rec $((${1}*1000)) 0
-    fi
-}
-
 statistics () {
     total_size=0
     field1_maxw=6
@@ -748,7 +719,7 @@ backups () {
 }
 
 offmount () {
-    offmount_${fstype}
+    offmount_${fstype}_${recv_fmt}
 }
 
 offmounts () {
@@ -834,13 +805,11 @@ EOF
 }
 
 fixmounts () {
-    prev_unfold=${send_unfold}
-    send_unfold=1
-    forall_zjobs \
+    send_unfold=1 \
+        forall_zjobs \
         zfs_wrapr \
         skip_eq_sendrecv \
         fixmount
-    send_unfold=${prev_unfold}
 }
 
 lambda () {
@@ -1339,14 +1308,15 @@ all () {
     # offmounts # note: offmounts integrated in backups to avoid unmount problems
     echo "# Saving restore scripts"
     restores
-    # generate bak_info dirs in the backup media:
+    echo "# generate bak_info dirs in the backup media"
     bak_infos
-    # generate fixmount_*.sh to restore the attributes of the filesystem:
+    echo "# generate fixmount_*.sh to restore the attributes of the filesystem"
     fixmounts
     echo "# Logging backup"
     backup_log
-    echo "# Preparing reports"
+    echo "# Show backup history"
     show_history
+    echo "# Show statistics"
     statistics
     echo "# Disconnecting"
     disconnect

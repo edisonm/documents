@@ -7,12 +7,16 @@ snapshot_zpool () {
     fi
 }
 
-destroy_snapshot_zpool () {
+zfs_destroy () {
     ssh_snap="`ssh_host ${1}`"
-    snapshot="${2}${4}@${5}"
-    if [ "`${ssh_snap} zfs list -pHt snapshot -o name ${snapshot} 2>/dev/null`" != "" ]; then
-        dryer ${ssh_snap} zfs destroy ${dropopts} ${snapshot}
+    if [ "`${ssh_snap} zfs list -pHt snapshot -o name ${2} 2>/dev/null`" != "" ]; then
+        ${ssh_snap} zfs destroy ${dropopts} ${2}
     fi
+}
+
+destroy_snapshot_zpool () {
+    snapshot="${2}${4}@${5}"
+    dryer zfs_destroy ${1} "${snapshot}"
 }
 
 sendsnap0_zpool () {
@@ -235,7 +239,7 @@ bak_info_zpool_clone () {
     if [ "${has_meta_info_fs}" = "" ] ; then
         dryer ${media_ssh} zfs create ${media_pool}/${info_dir} -o canmount=on -o mountpoint=/${info_dir}
     else
-        dryer ${media_ssh} rm -f "/mnt/${media_pool}/${info_dir}/fixmount_*.sh"
+        dryer ${media_ssh} rm -f "/mnt/${media_pool}/${info_dir}/fixmount_"'*'".sh"
     fi
 }
 
