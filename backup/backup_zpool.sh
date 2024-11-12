@@ -95,6 +95,23 @@ backup_zpool_clone () {
           | dryerp ${recv_ssh} zfs recv -d -F ${recv_zpoolfs} ) || true
 }
 
+backup_zpool_zdump () {
+    zfs_create_${recv_fmt}
+    if [ "${send_unfolded}" = 0 ] ; then
+        for send_zpoolfs in ${send_zpoolfss} ; do
+            send_zfs=${send_zpoolfs##${send_zpool}} backup_zpool_zdump_1
+        done
+    else
+        backup_zpool_zdump_1
+    fi
+}
+
+backup_zpool_zdump_1 () {
+    recv_dir="/mnt/${recv_zpool}/crbackup${recv_zfs}${send_zfs}"
+    ${recv_ssh} mkdir -p ${recv_dir}
+    backup_zpool_zdump_full `sendsnap`
+}
+
 backup_zpool_zdump_full () {
     backup_zpool_zdump_file_1 ${1}
     snapshot1=${1}
@@ -107,55 +124,19 @@ backup_zpool_zdump_full () {
     done
 }
 
-backup_zpool_zdump_incr () {
-    prevsnap=`prevsnap ${prevcmd}`
-    for snapshot2 in $* ; do
-        if [ $(((${prevsnap}<${snapshot2})&&(${snapshot2}<=${currsnap}))) = 1 ] ; then
-            backup_zpool_zdump_file_2 ${snapshot1} ${snapshot2}
-        fi
-        snapshot1=${snapshot2}
-    done
-}
+# Commented out since for incremental backups, we have to check all the
+# snapshots in case an incremental backup needs to be rebuild due to the
+# deletion of an intermediate snapshot:
 
-backup_zpool_zdump_1 () {
-    recv_dir="/mnt/${recv_zpool}/crbackup${recv_zfs}${send_zfs}"
-    ${recv_ssh} mkdir -p ${recv_dir}
-    backup_zpool_zdump_${baktype} `sendsnap`
-}
-
-backup_zpool_zdump () {
-    zfs_create_${recv_fmt}
-    if [ "${send_unfolded}" = 0 ] ; then
-        for send_zpoolfs in ${send_zpoolfss} ; do
-            send_zfs=${send_zpoolfs##${send_zpool}} backup_zpool_zdump_1
-        done
-    else
-        backup_zpool_zdump_1
-    fi
-}
-
-backup_restore_sh_zpool () {
-    nodry echo "restore_job ${send_zpool} ${recv_zfs} ${send_zfs}" \
-        | nodry ${recv_ssh} "cat >> /mnt/${recv_zpool}/crbackup/restore.sh"
-}
-
-snapshot_size_zpool_1 () {
-    size="`${send_ssh} zfs send -nvPc ${send_zpoolfs}@${snprefix}${1} 2>/dev/null | grep size | awk '{print $2}'`"
-    if [ "${size}" = "" ] ; then
-	echo 0
-    else
-	echo ${size}
-    fi
-}
-
-snapshot_size_zpool_2 () {
-    size="`${send_ssh} zfs send -nvPc -I ${send_zpoolfs}@${snprefix}${1} ${send_zpoolfs}@${snprefix}${2} 2>/dev/null | grep size | awk '{print $2}'`"
-    if [ "${size}" = "" ] ; then
-	echo 0
-    else
-	echo ${size}
-    fi
-}
+# backup_zpool_zdump_incr () {
+#     prevsnap=`prevsnap ${prevcmd}`
+#     for snapshot2 in $* ; do
+#         if [ $(((${prevsnap}<${snapshot2})&&(${snapshot2}<=${currsnap}))) = 1 ] ; then
+#             backup_zpool_zdump_file_2 ${snapshot1} ${snapshot2}
+#         fi
+#         snapshot1=${snapshot2}
+#     done
+# }
 
 # WARNING: Don't change prefixes full/incr, they are tweaked so that full
 # appears first, before incr when using ls to get the raw files, which is
@@ -187,6 +168,29 @@ backup_zpool_zdump_file_2 () {
               && dryer ${recv_ssh} "rm -f ${recv_dir}/full_*.raw-cleanup ${recv_dir}/incr_*_${1}.raw-cleanup" \
             ) || true
     fi
+}
+
+snapshot_size_zpool_1 () {
+    size="`${send_ssh} zfs send -nvPc ${send_zpoolfs}@${snprefix}${1} 2>/dev/null | grep size | awk '{print $2}'`"
+    if [ "${size}" = "" ] ; then
+	echo 0
+    else
+	echo ${size}
+    fi
+}
+
+snapshot_size_zpool_2 () {
+    size="`${send_ssh} zfs send -nvPc -I ${send_zpoolfs}@${snprefix}${1} ${send_zpoolfs}@${snprefix}${2} 2>/dev/null | grep size | awk '{print $2}'`"
+    if [ "${size}" = "" ] ; then
+	echo 0
+    else
+	echo ${size}
+    fi
+}
+
+backup_restore_sh_zpool () {
+    nodry echo "restore_job ${send_zpool} ${recv_zfs} ${send_zfs}" \
+        | nodry ${recv_ssh} "cat >> /mnt/${recv_zpool}/crbackup/restore.sh"
 }
 
 zfssetopts="-u"
