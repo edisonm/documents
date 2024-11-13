@@ -82,9 +82,9 @@ zfs_create_clone () {
 }
 
 zfs_create_zdump () {
-    has_recv_zpoolfs="`${recv_ssh} zfs list -Ho name ${recv_zpool}/BACK 2>/dev/null`" || true
+    has_recv_zpoolfs="`${recv_ssh} zfs list -Ho name ${recv_zpool}/crbackup 2>/dev/null`" || true
     if [ "${has_recv_zpoolfs}" = "" ] ; then
-        dryer ${recv_ssh} zfs create -o mountpoint=/crbackup -o canmount=on ${recv_zpool}/BACK
+        dryer ${recv_ssh} zfs create -o mountpoint=/crbackup -o canmount=on ${recv_zpool}/crbackup
     fi
     dryer ${recv_ssh} mkdir -p /mnt/${recv_zpool}/crbackup${recv_zfs}${send_zfs}
 }
@@ -151,7 +151,9 @@ backup_zpool_zdump_file_1 () {
         ( ( dryern ${send_ssh} zfs send -c ${send_zpoolfs}@${snprefix}${1} \
                 | dryerpn pv -reps ${snapshot_size} \
                 | dryerp ${recv_ssh} "( cat > ${recv_file}-partial ) && mv ${recv_file}-partial ${recv_file}" ) \
-              && dryer ${recv_ssh} "rm -f ${recv_dir}/full_*.raw-cleanup ${recv_dir}/incr_*_${1}.raw-cleanup" \
+              && ( if [ "${baktype}" = incr ] ; then \
+		       dryer ${recv_ssh} "rm -f ${recv_dir}/full_*.raw-cleanup ${recv_dir}/incr_*_${1}.raw-cleanup" ; \
+		   fi ) \
             ) || true
     fi
 }
@@ -166,7 +168,9 @@ backup_zpool_zdump_file_2 () {
                    ${send_zpoolfs}@${snprefix}${2} \
                 | dryerpn pv -reps ${snapshot_size} \
                 | dryerp ${recv_ssh} "( cat > ${recv_file}-partial ) && mv ${recv_file}-partial ${recv_file}" ) \
-              && dryer ${recv_ssh} "rm -f ${recv_dir}/full_*.raw-cleanup ${recv_dir}/incr_*_${1}.raw-cleanup" \
+              && ( if [ "${baktype}" = incr ] ; then \
+		       dryer ${recv_ssh} "rm -f ${recv_dir}/full_*.raw-cleanup ${recv_dir}/incr_*_${1}.raw-cleanup" ; \
+		   fi ) \
             ) || true
     fi
 }
