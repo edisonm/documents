@@ -9,14 +9,15 @@ snapshot_zpool () {
 
 zfs_destroy () {
     ssh_snap="`ssh_host ${1}`"
-    if [ "`${ssh_snap} zfs list -pHt snapshot -o name ${2} 2>/dev/null`" != "" ]; then
-        ${ssh_snap} zfs destroy ${dropopts} ${2}
+    if [ "${dryrun}" = 1 ] \
+           || [ "`${ssh_snap} zfs list -pHt snapshot -o name ${2} 2>/dev/null`" != "" ]; then
+        dryer ${ssh_snap} zfs destroy ${dropopts} ${2}
     fi
 }
 
 destroy_snapshot_zpool () {
     snapshot="${2}${4}@${5}"
-    dryer zfs_destroy ${1} "${snapshot}"
+    zfs_destroy ${1} "${snapshot}"
 }
 
 sendsnap0_zpool () {
