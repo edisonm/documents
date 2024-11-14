@@ -49,4 +49,4 @@ for DISK in ${DISKS} ; do
     done
 done
 
-dryer zpool create -o ashift=12 -o autotrim=on -O acltype=posixacl -O xattr=sa -O dnodesize=auto -O compression=on -O normalization=formD -O relatime=on -O canmount=off -O mountpoint=none -R /mnt ${ZPOOL} ${ZOPTS} ${VOLS}
+dryer zpool create -o ashift=12 -o autotrim=on -O acltype=posixacl -O xattr=sa -O dnodesize=auto -O compression=on -O normalization=formD -O relatime=on -O canmount=off -O mountpoint=none -R /mnt/${ZPOOL} ${ZPOOL} ${ZOPTS} ${VOLS}
