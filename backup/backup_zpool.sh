@@ -86,13 +86,24 @@ zfs_create_zdump () {
     if [ "${has_recv_zpoolfs}" = "" ] ; then
         dryer ${recv_ssh} zfs create -o mountpoint=/crbackup -o canmount=on ${recv_zpool}/crbackup
     fi
-    dryer ${recv_ssh} mkdir -p /mnt/${recv_zpool}/crbackup${recv_zfs}${send_zfs}
+    if ! ${recv_ssh} test -d /mnt/${recv_zpool}/crbackup${recv_zfs}${send_zfs} ; then
+        dryer ${recv_ssh} mkdir -p /mnt/${recv_zpool}/crbackup${recv_zfs}${send_zfs}
+    fi
 }
+
+set_progress_cmd () {
+   if [ $((${snapshot_size}>1048576)) = 1 ] ; then
+        progress_cmd="dryerpn pv -reps ${snapshot_size}"
+    else
+        progress_cmd="cat"
+    fi
+ }
 
 backup_zpool_clone () {
     zfs_create_${recv_fmt}
+    set_progress_cmd
     ( dryern ${send_ssh} zfs send -c ${sendopts} ${send_zpoolfs}@${snprefix}${currsnap} \
-          | dryerpn pv -reps ${snapshot_size} \
+          | ${progress_cmd} \
           | dryerp ${recv_ssh} zfs recv -d -F ${recv_zpoolfs} ) || true
 }
 
@@ -109,19 +120,25 @@ backup_zpool_zdump () {
 
 backup_zpool_zdump_1 () {
     recv_dir="/mnt/${recv_zpool}/crbackup${recv_zfs}${send_zfs}"
-    ${recv_ssh} mkdir -p ${recv_dir}
+    if ! ${recv_ssh} test -d ${recv_dir} ; then
+        dryer ${recv_ssh} mkdir -p ${recv_dir}
+    fi
     backup_zpool_zdump_full `sendsnap`
 }
 
 backup_zpool_zdump_full () {
-    backup_zpool_zdump_file_1 ${1}
     snapshot1=${1}
+    backup_zpool_zdump_file_1 ${snapshot1} || exit 1
     shift
+    snap_files="`${recv_ssh} "cd ${recv_dir} ; ls incr_*_*.raw" 2>/dev/null`"
     for snapshot2 in $* ; do
         if [ $((${snapshot2}<=${currsnap})) = 1 ] ; then
-            backup_zpool_zdump_file_2 ${snapshot1} ${snapshot2}
+            backup_zpool_zdump_file_2 ${snapshot1} ${snapshot2} || exit 1
         fi
         snapshot1=${snapshot2}
+    done
+    for drop_file in `${recv_ssh} ls ${recv_dir}/*.raw-cleanup 2>/dev/null` ; do
+        dryer ${recv_ssh} "rm -f ${drop_file}"
     done
 }
 
@@ -145,33 +162,54 @@ backup_zpool_zdump_full () {
 
 backup_zpool_zdump_file_1 () {
     recv_file="${recv_dir}/full_${1}.raw"
-    if ! ${recv_ssh} test -f ${recv_file} ; then
+    recv_file_exists=`${recv_ssh} test -f ${recv_file} ; echo $?`
+    if [ "${recv_file_exists}" != 0 ] ; then
         snapshot_size="`snapshot_size_zpool_1 ${1}`"
         nodry echo "# Saving ${recv_file} (`byteconv ${snapshot_size}`)"
-        ( ( dryern ${send_ssh} zfs send -c ${send_zpoolfs}@${snprefix}${1} \
-                | dryerpn pv -reps ${snapshot_size} \
-                | dryerp ${recv_ssh} "( cat > ${recv_file}-partial ) && mv ${recv_file}-partial ${recv_file}" ) \
-              && ( if [ "${baktype}" = incr ] ; then \
-		       dryer ${recv_ssh} "rm -f ${recv_dir}/full_*.raw-cleanup ${recv_dir}/incr_*_${1}.raw-cleanup" ; \
-		   fi ) \
-            ) || true
+        set_progress_cmd
+        ( dryern ${send_ssh} zfs send -c ${send_zpoolfs}@${snprefix}${1} \
+              | ${progress_cmd} \
+              | dryerp ${recv_ssh} "cat > ${recv_file}-partial" ) || exit 1
+    fi
+    for drop_file in `${recv_ssh} ls ${recv_dir}/full_\*.raw 2>/dev/null | grep -v ${recv_file}` ; do
+        dryer ${recv_ssh} "rm -f ${drop_file}"
+    done
+    if [ "${recv_file_exists}" != 0 ] ; then
+        dryer ${recv_ssh} mv ${recv_file}-partial ${recv_file}
     fi
 }
 
 backup_zpool_zdump_file_2 () {
-    recv_file="${recv_dir}/incr_${1}_${2}.raw"
-    if ! ${recv_ssh} test -f ${recv_file} ; then
+    recv_name="incr_${1}_${2}.raw"
+    recv_file="${recv_dir}/${recv_name}"
+    recv_file_exists=`${recv_ssh} test -f ${recv_file} ; echo $?`
+    if [ "${recv_file_exists}" != 0 ] ; then
         snapshot_size="`snapshot_size_zpool_2 ${1} ${2}`"
         nodry echo "# Saving ${recv_file} (`byteconv ${snapshot_size}`)"
-        ( ( dryern ${send_ssh} zfs send -c -I \
-                   ${send_zpoolfs}@${snprefix}${1} \
-                   ${send_zpoolfs}@${snprefix}${2} \
-                | dryerpn pv -reps ${snapshot_size} \
-                | dryerp ${recv_ssh} "( cat > ${recv_file}-partial ) && mv ${recv_file}-partial ${recv_file}" ) \
-              && ( if [ "${baktype}" = incr ] ; then \
-		       dryer ${recv_ssh} "rm -f ${recv_dir}/full_*.raw-cleanup ${recv_dir}/incr_*_${1}.raw-cleanup" ; \
-		   fi ) \
-            ) || true
+        set_progress_cmd
+        ( dryern ${send_ssh} zfs send -c -I \
+                 ${send_zpoolfs}@${snprefix}${1} \
+                 ${send_zpoolfs}@${snprefix}${2} \
+              | ${progress_cmd} \
+              | dryerp ${recv_ssh} "cat > ${recv_file}-partial" ) || exit 1
+    fi
+    for drop_file in ${snap_files} ; do
+        if [ "${drop_file}" != "${recv_name}" ] ; then
+            # echo "# checking for deletion ${recv_dir}/${drop_file}"
+            # Extract the first number
+            snap1="${drop_file#*_}"  # Remove everything up to the first underscore
+            snap1="${snap1%%_*}"     # Remove everything after the next underscore
+            # Extract the second number
+            snap2="${drop_file##*_}" # Remove everything up to the last underscore
+            snap2="${snap2%.raw}"    # Remove the file extension
+            # if a snapshot is between ${1} and ${2}, drop it:
+            if [ $((((${1}<=${snap1})&&(${snap1}<${2}))||((${1}<${snap2})&&(${snap2}<=${2})))) = 1 ] ; then
+                dryer ${recv_ssh} "rm -f ${recv_dir}/${drop_file}"
+            fi
+        fi
+    done
+    if [ "${recv_file_exists}" != 0 ] ; then
+        dryer ${recv_ssh} mv ${recv_file}-partial ${recv_file}
     fi
 }
 
@@ -248,7 +286,7 @@ bak_info_zpool_clone () {
     if [ "${has_meta_info_fs}" = "" ] ; then
         dryer ${media_ssh} zfs create ${media_pool}/${info_dir} -o canmount=on -o mountpoint=/${info_dir}
     else
-        dryer ${media_ssh} rm -f "/mnt/${media_pool}/${info_dir}/fixmount_"'*'".sh"
+        dryer ${media_ssh} rm -f "/mnt/${media_pool}/${info_dir}/fixmount_\*.sh"
     fi
 }
 
