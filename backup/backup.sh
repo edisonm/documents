@@ -1319,6 +1319,9 @@ all () {
     echo "# Show statistics"
     statistics
     echo "# Disconnecting"
+    if [ "${dryrun}" = 0 ] ; then
+	sleep 10 # avoid pool is busy error
+    fi
     disconnect
     # dryrun=1 disconnect
     # echo "Note: You must run ./backup.sh disconnect before to remove the media."

@@ -77,18 +77,23 @@ zfs_create_rec_clone () {
     fi
 }
 
-zfs_create_clone () {
-    zfs_create_rec_clone ${recv_zpoolfs}
-}
-
-zfs_create_zdump () {
+zfs_create_comm () {
     has_recv_zpoolfs="`${recv_ssh} zfs list -Ho name ${recv_zpool}/crbackup 2>/dev/null`" || true
     if [ "${has_recv_zpoolfs}" = "" ] ; then
         dryer ${recv_ssh} zfs create -o mountpoint=/crbackup -o canmount=on ${recv_zpool}/crbackup
     fi
+}
+
+zfs_create_zdump () {
+    zfs_create_comm
     if ! ${recv_ssh} test -d /mnt/${recv_zpool}/crbackup${recv_zfs}${send_zfs} ; then
         dryer ${recv_ssh} mkdir -p /mnt/${recv_zpool}/crbackup${recv_zfs}${send_zfs}
     fi
+}
+
+zfs_create_clone () {
+    zfs_create_comm
+    zfs_create_rec_clone ${recv_zpoolfs}
 }
 
 set_progress_cmd () {

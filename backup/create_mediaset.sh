@@ -1,6 +1,6 @@
 #!/bin/bash
 
-DISKS="/dev/sda /dev/sdb /dev/sdc"
+DISKS="/dev/sda /dev/sdb"
 ZPOOL="set2"
 # PARTS="1 2"
 # PARTSIZE=+4883735552
