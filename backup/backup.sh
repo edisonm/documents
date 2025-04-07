@@ -366,6 +366,7 @@ dropsnaps () {
     # Note: duplicated calls are handled by destroy_snapshot, so don't try to
     # optimize this here
     dropopts="-r"
+    
     forall_backjobs \
         destroy_send_dropsnap ${dropsnaps}
 
@@ -579,7 +580,6 @@ set_send_hostpoolsfs () {
 }
 
 statistics () {
-    total_size=0
     field1_maxw=6
     
     unset recv_hosts
@@ -612,16 +612,17 @@ statistics () {
         printf " %*s" ${width[${recv_hostpool}]} ${recv_hostpool}
         recv_stot[${recv_hostpool}]=0
     done
+
     printf "\n"
 
     printf "%s" `repeatc ${field1_maxw} -`
-    
+
     for recv_hostpool in ${!recv_hosts[*]} ; do
         printf " %s" `repeatc ${width[${recv_hostpool}]} -`
     done
+
     printf "\n"
 
-    send_total=0
     for send_hostpoolfs in ${!send_hosts[*]} ; do
         printf "%-*s" ${field1_maxw} ${send_hostpoolfs}
         for recv_hostpool in ${!recv_hosts[*]} ; do
@@ -687,10 +688,17 @@ zpool_list () {
     ( ${media_ssh} lsblk -f|grep -v zd|grep btrfs ) || true
 }
 
+update_total () {
+    if [ "`recvsnap|grep ${currsnap}`" = "" ] ; then
+        snapshot_size=`snapshot_size`
+        update_${fstype}_${recv_fmt}
+    fi
+}
+
 backup () {
     if [ "`recvsnap|grep ${currsnap}`" = "" ] ; then
         snapshot_size=`snapshot_size`
-        echo "$action ${send_host}:${send_zpoolfs} to ${recv_host}:${recv_zpoolfs} (`byteconv ${snapshot_size}`)"
+        echo "$action ${send_host}:${send_zpoolfs} to ${recv_host}:${recv_zpoolfs}"
         backup_${fstype}_${recv_fmt}
 	if [ "${send_unfolded}" = 0 ] ; then
 	    for send_zpoolfs in ${send_zpoolfss} ; do
@@ -712,10 +720,21 @@ restore_sh () {
 }
 
 backups () {
+    send_total=0
+    forall_zjobs \
+        zfs_wrapr \
+        skip_eq_sendrecv \
+        update_total
+
+    send_offset=0
     forall_zjobs \
         zfs_wrapr \
         skip_eq_sendrecv \
         backup
+
+    if [ "${send_total}" != "${send_offset}" ] ; then
+        echo "ERROR: Total and Offset bytes doesn't match at the end: ${send_total} != ${send_offset}" 1>&2
+    fi
 }
 
 offmount () {

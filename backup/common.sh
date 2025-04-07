@@ -12,6 +12,11 @@ set_key () {
     fi
 }
 
+pvv () {
+    local desc="`byteconv $1`"
+    ./pvv-pipe.py --desc "`printf '%6s' $desc`" --offset $2 -s $3
+}
+
 ask_key () {
     echo "Input the password you used before"
     export KEY_="$($ASKPASS_ "Password:")"
