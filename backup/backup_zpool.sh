@@ -9,15 +9,15 @@ snapshot_zpool () {
 
 zfs_destroy () {
     ssh_snap="`ssh_host ${1}`"
-    if [ "${dryrun}" = 1 ] \
-           || [ "`${ssh_snap} zfs list -pHt snapshot -o name ${2} 2>/dev/null`" != "" ]; then
-        dryer ${ssh_snap} zfs destroy ${dropopts} ${2}
-    fi
+    # if [ "${dryrun}" != 1 ]; then
+    while read -r snapshot ; do
+	dryer ${ssh_snap} zfs destroy ${dropopts} ${snapshot} < /dev/null
+    done < <((${ssh_snap} zfs list -rpHt snapshot -o name ${2} 2>/dev/null | grep @${3}))
+    # fi
 }
 
 destroy_snapshot_zpool () {
-    snapshot="${2}${4}@${5}"
-    zfs_destroy ${1} "${snapshot}"
+    zfs_destroy ${1} ${2}${4} ${5}
 }
 
 sendsnap0_zpool () {
@@ -49,13 +49,13 @@ zfs_prev_zpool () {
             prevsnap=`prevsnap ${prevcmd}`
             sendopts="-R"
 	    dropopts=""
-            send_zfs=${send_zpoolfs##${send_zpool}} $*
+            send_zfs=${send_zpoolfs##${send_zpool}} $* < /dev/null
         done
     else
         send_unfolded=0
         sendopts="-R"
         dropopts="-r"
-        $*
+        $* < /dev/null
     fi
 }
 
@@ -135,14 +135,14 @@ backup_zpool_zdump_full () {
     snapshot1=${1}
     backup_zpool_zdump_file_1 ${snapshot1} || exit 1
     shift
-    snap_files="`${recv_ssh} "cd ${recv_dir} ; ls incr_*_*.raw" 2>/dev/null`"
+    snap_files="`${recv_ssh} "cd ${recv_dir} ; ls incr_*_*.raw" 2>/dev/null || true`"
     for snapshot2 in $* ; do
         if [ $((${snapshot2}<=${currsnap})) = 1 ] ; then
             backup_zpool_zdump_file_2 ${snapshot1} ${snapshot2} || exit 1
         fi
         snapshot1=${snapshot2}
     done
-    for drop_file in `${recv_ssh} ls ${recv_dir}/*.raw-cleanup 2>/dev/null` ; do
+    for drop_file in `${recv_ssh} ls ${recv_dir}/*.raw-cleanup 2>/dev/null || true` ; do
         dryer ${recv_ssh} "rm -f ${drop_file}"
     done
 }
