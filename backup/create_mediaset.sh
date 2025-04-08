@@ -1,13 +1,15 @@
 #!/bin/bash
 
-DISKS="/dev/sda /dev/sdb"
-ZPOOL="set2"
+DISKS="/dev/sda /dev/sdb /dev/sdc"
+ZPOOL="set3"
 # PARTS="1 2"
 # PARTSIZE=+4883735552
-# ZOPTS= raidz1
+# ZOPTS=raidz1
 
 PARTS="1"
-PARTSIZE=+9767473112
+PARTSIZE=0
+
+ASKPASS_='/lib/cryptsetup/askpass'
 
 dryrun=0
 
@@ -30,9 +32,10 @@ for DISK in ${DISKS} ; do
     dryer sgdisk -o $DISK
     for PART in ${PARTS} ; do
 	dryer sgdisk -n${PART}:0:${PARTSIZE} -t${PART}:8300 ${DISK}
-	dryern printf "%s" "$KEY_"|dryerp cryptsetup luksFormat --sector-size=4096 --key-file - ${DISK}${PART} 
+	# Add --sector-size=4096 if needed
+	dryern printf "%s" "$KEY_"|dryerp cryptsetup luksFormat --key-file - ${DISK}${PART}
 	dryern printf "%s" "$KEY_"|dryerp cryptsetup luksAddKey --key-file - ${DISK}${PART} /crypto_keyfile.bin
-	echo -en "$(blkid -s UUID -o value ${DISK}${PART}) \\\n         " >> settings_${ZPOOL}.sh
+	echo -en $(blkid -s UUID -o value ${DISK}${PART})' \\\n         ' >> settings_${ZPOOL}.sh
 	next_id
     done
 done

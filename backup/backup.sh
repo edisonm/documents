@@ -198,7 +198,7 @@ forall_backjobs () {
 	fi
 	
         if [ "`avail_ssh ${send_host}`" = 1 ] ; then
-            $* < /dev/null
+            $* < /dev/null || true
         fi
     done < <(list_backjobs)
 }
