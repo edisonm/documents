@@ -97,12 +97,15 @@ zfs_create_clone () {
 }
 
 set_progress_cmd () {
-    progress_cmd="dryerpn pvv ${snapshot_size} ${send_offset} ${send_total}"
+    send_fileno=$((${send_fileno}+1))
+    description="${send_zfs} ${send_fileno} `byteconv ${snapshot_size}`"
+    progress_cmd="dryerpn pvv ${send_offset}"
     send_offset=$((${snapshot_size}+${send_offset}))
 }
 
 update_send_total_1 () {
     send_total=$((${snapshot_size}+${send_total}))
+    send_files=$((1+${send_files}))
 }
 
 update_zpool_clone () {
@@ -222,7 +225,7 @@ backup_zpool_zdump_file_1 () {
     recv_file_exists=`${recv_ssh} test -f ${recv_file} ; echo $?`
     if [ "${recv_file_exists}" != 0 ] ; then
         snapshot_size="`snapshot_size_zpool_1 ${1}`"
-        nodry echo "# Saving ${recv_file}"
+        ifdry echo "# Saving ${recv_file}"
         set_progress_cmd
         ( dryern ${send_ssh} zfs send -c ${send_zpoolfs}@${snprefix}${1} \
               | ${progress_cmd} \
@@ -242,7 +245,7 @@ backup_zpool_zdump_file_2 () {
     recv_file_exists=`${recv_ssh} test -f ${recv_file} ; echo $?`
     if [ "${recv_file_exists}" != 0 ] ; then
         snapshot_size="`snapshot_size_zpool_2 ${1} ${2}`"
-        nodry echo "# Saving ${recv_file}"
+        ifdry echo "# Saving ${recv_file}"
         set_progress_cmd
         ( dryern ${send_ssh} zfs send -c -I \
                  ${send_zpoolfs}@${snprefix}${1} \

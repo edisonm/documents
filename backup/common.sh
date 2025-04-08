@@ -13,8 +13,7 @@ set_key () {
 }
 
 pvv () {
-    local desc="`byteconv $1`"
-    ./pvv-pipe.py --desc "`printf '%6s' $desc`" --offset $2 -s $3
+    ./pvv-pipe.py --desc "${description}" --offset $1 --size ${send_total}
 }
 
 ask_key () {

@@ -719,13 +719,17 @@ restore_sh () {
     backup_restore_sh_${fstype}
 }
 
-backups () {
+calc_totals () {
     send_total=0
+    send_files=0
+
     forall_zjobs \
         zfs_wrapr \
         skip_eq_sendrecv \
         update_total
+}
 
+backups () {
     send_offset=0
     forall_zjobs \
         zfs_wrapr \
@@ -1321,7 +1325,9 @@ all () {
     hotrun snapshots
     echo "# Applying retention policy"
     exec_smartretp
-    echo "# Creating backups"
+    echo "# Calculating totals"
+    calc_totals
+    echo "# Creating backups: ${send_files} objects / `byteconv ${send_total}`"
     backups
     # set canmount=off to avoid filesystems compiting for the same mountpoint:
     # offmounts # note: offmounts integrated in backups to avoid unmount problems
