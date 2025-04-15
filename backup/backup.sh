@@ -729,6 +729,40 @@ calc_totals () {
         update_total
 }
 
+benchmark_noop () {
+    true
+}
+
+echo_mediahost () {
+    echo ${mediahost}
+}
+
+echo_sendhost () {
+    echo ${send_host}
+}
+
+declare -A host_snapshots
+
+update_host_snapshots () {
+    while read -r host ; do
+        host_ssh="`ssh_host ${host}`"
+        host_snapshots[${host}]="`${host_ssh} zfs list -pHt snapshot -o name 2>/dev/null < /dev/null`"
+    done < <(( forall_mediahosts \
+                   echo_mediahost ; \
+               forall_backjobs \
+                   echo_sendhost ; \
+             ) | sort -u)
+}
+
+benchmarking () {
+    echo "# empty loop"
+    forall_zjobs \
+        zfs_wrapr \
+        skip_eq_sendrecv \
+        benchmark_noop
+    echo "# done"
+}
+
 backups () {
     send_offset=0
     forall_zjobs \
@@ -1321,8 +1355,13 @@ all () {
     echo "# Backup began at `date`"
     echo "# Connecting"
     connect
+    echo "# update snapshot lists"
+    update_host_snapshots
     echo "# Taking snapshots to get statistics right"
-    hotrun snapshots
+    # hotrun
+    snapshots
+    echo "# update snapshot lists (2)"
+    update_host_snapshots
     echo "# Applying retention policy"
     exec_smartretp
     echo "# Calculating totals"
@@ -1341,6 +1380,8 @@ all () {
     backup_log
     echo "# Show backup history"
     show_history
+    echo "# update snapshot lists (3)"
+    update_host_snapshots
     echo "# Show statistics"
     statistics
     echo "# Disconnecting"
@@ -1381,4 +1422,3 @@ main () {
 }
 
 main $*
-# smartretp 24100219 24100707 24101519 24102120 24102820 24102919 24103007 24103119 24110119 24110207 24110301 24110320 24110321 24110400 24110407 24110423

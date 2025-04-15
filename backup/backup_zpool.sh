@@ -2,7 +2,8 @@ info_dir=crbackup
 
 snapshot_zpool () {
     snapshot=${send_pool}${send_zfs}@${snprefix}${currsnap}
-    if [ "`${send_ssh} zfs list -pHt snapshot -o name ${snapshot} 2>/dev/null`" = "" ] ; then
+    local host_snap=`echo "${host_snapshots[${send_host}]}" | grep "^${snapshot}"`
+    if [ "${host_snap}" = "" ] ; then
 	dryer ${send_ssh} zfs snapshot -r ${snapshot}
     fi
 }
@@ -12,7 +13,7 @@ zfs_destroy () {
     # if [ "${dryrun}" != 1 ]; then
     while read -r snapshot ; do
 	dryer ${ssh_snap} zfs destroy ${dropopts} ${snapshot} 2>/dev/null < /dev/null || true
-    done < <((${ssh_snap} zfs list -rpHt snapshot -o name ${2} 2>/dev/null | grep @${3}))
+    done < <((echo "${host_snapshots[${1}]}" | grep "^${2}@${3}"))
     # fi
 }
 
@@ -21,8 +22,10 @@ destroy_snapshot_zpool () {
 }
 
 sendsnap0_zpool () {
-    ${send_ssh} zfs list -Ht snapshot -o name ${send_zpoolfs} 2>/dev/null | \
+    echo "${host_snapshots[${send_host}]}" | grep "^${send_zpoolfs}@" | \
         sed -e "s:${send_zpoolfs}@::g" | sort -u
+    # ${send_ssh} zfs list -Ht snapshot -o name ${send_zpoolfs} 2>/dev/null | \
+    #     sed -e "s:${send_zpoolfs}@::g" | sort -u
 }
 
 recvsnap0_zpool () {
@@ -30,8 +33,10 @@ recvsnap0_zpool () {
 }
 
 recvsnap0_zpool_clone () {
-    ${recv_ssh} zfs list -Ht snapshot -o name ${recv_zpoolfs}${send_zfs} 2>/dev/null | \
+    echo "${host_snapshots[${recv_host}]}" | grep ${recv_zpoolfs}${send_zfs} | \
         sed -e "s:${recv_zpoolfs}${send_zfs}@::g" | sort -u
+    # ${recv_ssh} zfs list -Ht snapshot -o name ${recv_zpoolfs}${send_zfs} 2>/dev/null | \
+    #     sed -e "s:${recv_zpoolfs}${send_zfs}@::g" | sort -u
 }
 
 recvsnap0_zpool_zdump () {
