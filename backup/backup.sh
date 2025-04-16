@@ -744,6 +744,7 @@ echo_sendhost () {
 declare -A host_snapshots
 
 update_host_snapshots () {
+    echo "# update snapshot lists"
     while read -r host ; do
         host_ssh="`ssh_host ${host}`"
         host_snapshots[${host}]="`${host_ssh} zfs list -pHt snapshot -o name 2>/dev/null < /dev/null`"
@@ -780,6 +781,7 @@ offmount () {
 }
 
 offmounts () {
+    # note: offmounts integrated in backups to avoid unmount problems
     send_unfold=1 \
         forall_zjobs \
         zfs_wrapr \
@@ -1178,7 +1180,7 @@ show_history () {
 }
 
 dryrun () {
-    olddry=$dryrun
+    local olddry=$dryrun
     dryrun=1
     echo "Note: dryrun, execute the next command to do the real stuff:"
     echo $0 $*
@@ -1188,14 +1190,14 @@ dryrun () {
 }
 
 echorun () {
-    olddry=$dryrun
+    local olddry=$dryrun
     dryrun=2
     main $*
     dryrun=$olddry
 }
 
 hotrun () {
-    olddry=$dryrun
+    local olddry=$dryrun
     dryrun=0
     main $*
     dryrun=$olddry
@@ -1355,31 +1357,26 @@ all () {
     echo "# Backup began at `date`"
     echo "# Connecting"
     connect
-    echo "# update snapshot lists"
     update_host_snapshots
     echo "# Taking snapshots to get statistics right"
-    # hotrun
-    snapshots
-    echo "# update snapshot lists (2)"
-    update_host_snapshots
+    hotrun snapshots
+    nodry update_host_snapshots
     echo "# Applying retention policy"
     exec_smartretp
     echo "# Calculating totals"
     calc_totals
     echo "# Creating backups: ${send_files} objects / `byteconv ${send_total}`"
     backups
-    # set canmount=off to avoid filesystems compiting for the same mountpoint:
-    # offmounts # note: offmounts integrated in backups to avoid unmount problems
+    # offmounts
     echo "# Saving restore scripts"
     restores
     echo "# generate bak_info dirs in the backup media"
     bak_infos
     echo "# generate fixmount_*.sh to restore the attributes of the filesystem"
     fixmounts
+    nodry update_host_snapshots
     echo "# Logging backup"
     backup_log
-    echo "# update snapshot lists (3)"
-    update_host_snapshots
     echo "# Show backup history"
     show_history
     echo "# Show statistics"

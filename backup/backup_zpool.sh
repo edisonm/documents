@@ -103,7 +103,8 @@ zfs_create_clone () {
 
 set_progress_cmd () {
     send_fileno=$((${send_fileno}+1))
-    description="${send_zfs} ${send_fileno} `byteconv ${snapshot_size}`"
+    description="${send_zfs##/} ${send_fileno} `byteconv ${snapshot_size}`"
+    ifdry echo description="${description}"
     progress_cmd="dryerpn pvv ${send_offset}"
     send_offset=$((${snapshot_size}+${send_offset}))
 }
@@ -129,6 +130,7 @@ update_zpool_zdump () {
 
 update_zpool_zdump_1 () {
     recv_dir="/mnt/${recv_zpool}/crbackup${recv_zfs}${send_zfs}"
+    recv_files="`${recv_ssh} "cd ${recv_dir} ; ls *_*.raw" 2>/dev/null || true`"
     update_zpool_zdump_full `sendsnap`
 }
 
@@ -144,10 +146,23 @@ update_zpool_zdump_full () {
     done
 }
 
+recv_file_exists () {
+    # ${recv_ssh} test -f ${recv_file}
+    echo "${recv_files}" | grep "${recv_name}" > /dev/null
+}
+
+# recv_file_exists () {
+#     if [ "`ls_recv_file_exists`" = "" ] ; then
+#         return 1
+#     else
+#         return 0
+#     fi
+# }
+
 update_zpool_zdump_file_1 () {
-    recv_file="${recv_dir}/full_${1}.raw"
-    recv_file_exists=`${recv_ssh} test -f ${recv_file} ; echo $?`
-    if [ "${recv_file_exists}" != 0 ] ; then
+    recv_name="full_${1}.raw"
+    recv_file="${recv_dir}/${recv_name}"
+    if ! recv_file_exists ; then
         snapshot_size="`snapshot_size_zpool_1 ${1}`"
         update_send_total_1
     fi
@@ -156,8 +171,7 @@ update_zpool_zdump_file_1 () {
 update_zpool_zdump_file_2 () {
     recv_name="incr_${1}_${2}.raw"
     recv_file="${recv_dir}/${recv_name}"
-    recv_file_exists=`${recv_ssh} test -f ${recv_file} ; echo $?`
-    if [ "${recv_file_exists}" != 0 ] ; then
+    if ! recv_file_exists ; then
         snapshot_size="`snapshot_size_zpool_2 ${1} ${2}`"
         update_send_total_1
     fi
@@ -185,6 +199,7 @@ backup_zpool_zdump () {
 
 backup_zpool_zdump_1 () {
     recv_dir="/mnt/${recv_zpool}/crbackup${recv_zfs}${send_zfs}"
+    recv_files="`${recv_ssh} "cd ${recv_dir} ; ls *_*.raw" 2>/dev/null || true`"
     if ! ${recv_ssh} test -d ${recv_dir} ; then
         dryer ${recv_ssh} mkdir -p ${recv_dir}
     fi
@@ -226,9 +241,9 @@ backup_zpool_zdump_full () {
 # required by the restore_job script to work properly.
 
 backup_zpool_zdump_file_1 () {
-    recv_file="${recv_dir}/full_${1}.raw"
-    recv_file_exists=`${recv_ssh} test -f ${recv_file} ; echo $?`
-    if [ "${recv_file_exists}" != 0 ] ; then
+    recv_name="full_${1}.raw"
+    recv_file="${recv_dir}/${recv_name}"
+    if ! recv_file_exists ; then
         snapshot_size="`snapshot_size_zpool_1 ${1}`"
         ifdry echo "# Saving ${recv_file}"
         set_progress_cmd
@@ -239,7 +254,7 @@ backup_zpool_zdump_file_1 () {
     for drop_file in `${recv_ssh} ls ${recv_dir}/full_\*.raw 2>/dev/null | grep -v ${recv_file}` ; do
         dryer ${recv_ssh} "rm -f ${drop_file}"
     done
-    if [ "${recv_file_exists}" != 0 ] ; then
+    if ! recv_file_exists ; then
         dryer ${recv_ssh} mv ${recv_file}-partial ${recv_file}
     fi
 }
@@ -247,8 +262,7 @@ backup_zpool_zdump_file_1 () {
 backup_zpool_zdump_file_2 () {
     recv_name="incr_${1}_${2}.raw"
     recv_file="${recv_dir}/${recv_name}"
-    recv_file_exists=`${recv_ssh} test -f ${recv_file} ; echo $?`
-    if [ "${recv_file_exists}" != 0 ] ; then
+    if ! recv_file_exists ; then
         snapshot_size="`snapshot_size_zpool_2 ${1} ${2}`"
         ifdry echo "# Saving ${recv_file}"
         set_progress_cmd
@@ -273,7 +287,7 @@ backup_zpool_zdump_file_2 () {
             fi
         fi
     done
-    if [ "${recv_file_exists}" != 0 ] ; then
+    if ! recv_file_exists ; then
         dryer ${recv_ssh} mv ${recv_file}-partial ${recv_file}
     fi
 }
