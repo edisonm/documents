@@ -1378,10 +1378,10 @@ all () {
     fixmounts
     echo "# Logging backup"
     backup_log
-    echo "# Show backup history"
-    show_history
     echo "# update snapshot lists (3)"
     update_host_snapshots
+    echo "# Show backup history"
+    show_history
     echo "# Show statistics"
     statistics
     echo "# Disconnecting"
