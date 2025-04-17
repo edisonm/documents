@@ -1360,7 +1360,7 @@ all () {
     update_host_snapshots
     echo "# Taking snapshots to get statistics right"
     hotrun snapshots
-    nodry update_host_snapshots
+    update_host_snapshots
     echo "# Applying retention policy"
     exec_smartretp
     echo "# Calculating totals"
