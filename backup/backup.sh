@@ -698,7 +698,7 @@ update_total () {
 backup () {
     if [ "`recvsnap|grep ${currsnap}`" = "" ] ; then
         snapshot_size=`snapshot_size`
-        echo "$action ${send_host}:${send_zpoolfs} to ${recv_host}:${recv_zpoolfs}"
+        echo -e "\r$action ${send_host}:${send_zpoolfs} to ${recv_host}:${recv_zpoolfs}"
         backup_${fstype}_${recv_fmt}
 	if [ "${send_unfolded}" = 0 ] ; then
 	    for send_zpoolfs in ${send_zpoolfss} ; do
@@ -770,6 +770,8 @@ backups () {
         zfs_wrapr \
         skip_eq_sendrecv \
         backup
+
+    nodry echo
 
     if [ "${send_total}" != "${send_offset}" ] ; then
         echo "ERROR: Total and Offset bytes doesn't match at the end: ${send_total} != ${send_offset}" 1>&2
@@ -1363,6 +1365,7 @@ all () {
     update_host_snapshots
     echo "# Applying retention policy"
     exec_smartretp
+    update_host_snapshots
     echo "# Calculating totals"
     calc_totals
     echo "# Creating backups: ${send_files} objects / `byteconv ${send_total}`"

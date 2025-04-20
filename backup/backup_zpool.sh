@@ -104,7 +104,7 @@ zfs_create_clone () {
 set_progress_cmd () {
     send_fileno=$((${send_fileno}+1))
     description="${send_zfs##/} ${send_fileno} `byteconv ${snapshot_size}`"
-    ifdry echo description="${description}"
+    ifdry echo "# description=${description}"
     progress_cmd="dryerpn pvv ${send_offset}"
     send_offset=$((${snapshot_size}+${send_offset}))
 }
@@ -250,12 +250,18 @@ backup_zpool_zdump_file_1 () {
         ( dryern ${send_ssh} zfs send -c ${send_zpoolfs}@${snprefix}${1} \
               | ${progress_cmd} \
               | dryerp ${recv_ssh} "cat > ${recv_file}-partial" ) || exit 1
+        dryer ${recv_ssh} "rm -f ${recv_dir}/full_\*.raw ; mv ${recv_file}-partial ${recv_file}"
+        nodry fix_totals
     fi
-    for drop_file in `${recv_ssh} ls ${recv_dir}/full_\*.raw 2>/dev/null | grep -v ${recv_file}` ; do
-        dryer ${recv_ssh} "rm -f ${drop_file}"
-    done
-    if ! recv_file_exists ; then
-        dryer ${recv_ssh} mv ${recv_file}-partial ${recv_file}
+}
+
+fix_totals () {
+    file_size=`${recv_ssh} "stat -c '%s' ${recv_file}"`
+    delta_size=$((${file_size}-${snapshot_size}))
+    if [ "${delta_size}" != 0 ] ; then
+        # echo "delta_size=${delta_size}"
+        send_offset=$((${delta_size}+${send_offset}))
+        send_total=$((${delta_size}+${send_total}))
     fi
 }
 
@@ -271,23 +277,21 @@ backup_zpool_zdump_file_2 () {
                  ${send_zpoolfs}@${snprefix}${2} \
               | ${progress_cmd} \
               | dryerp ${recv_ssh} "cat > ${recv_file}-partial" ) || exit 1
-    fi
-    for drop_file in ${snap_files} ; do
-        if [ "${drop_file}" != "${recv_name}" ] ; then
-            # echo "# checking for deletion ${recv_dir}/${drop_file}"
-            # Extract the first number
-            snap1="${drop_file#*_}"  # Remove everything up to the first underscore
-            snap1="${snap1%%_*}"     # Remove everything after the next underscore
-            # Extract the second number
-            snap2="${drop_file##*_}" # Remove everything up to the last underscore
-            snap2="${snap2%.raw}"    # Remove the file extension
-            # if a snapshot is between ${1} and ${2}, drop it:
-            if [ $((((${1}<=${snap1})&&(${snap1}<${2}))||((${1}<${snap2})&&(${snap2}<=${2})))) = 1 ] ; then
-                dryer ${recv_ssh} "rm -f ${recv_dir}/${drop_file}"
+        for drop_file in ${snap_files} ; do
+            if [ "${drop_file}" != "${recv_name}" ] ; then
+                # echo "# checking for deletion ${recv_dir}/${drop_file}"
+                # Extract the first number
+                snap1="${drop_file#*_}"  # Remove everything up to the first underscore
+                snap1="${snap1%%_*}"     # Remove everything after the next underscore
+                # Extract the second number
+                snap2="${drop_file##*_}" # Remove everything up to the last underscore
+                snap2="${snap2%.raw}"    # Remove the file extension
+                # if a snapshot is between ${1} and ${2}, drop it:
+                if [ $((((${1}<=${snap1})&&(${snap1}<${2}))||((${1}<${snap2})&&(${snap2}<=${2})))) = 1 ] ; then
+                    dryer ${recv_ssh} "rm -f ${recv_dir}/${drop_file}"
+                fi
             fi
-        fi
-    done
-    if ! recv_file_exists ; then
+        done
         dryer ${recv_ssh} mv ${recv_file}-partial ${recv_file}
     fi
 }

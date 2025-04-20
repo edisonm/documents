@@ -31,9 +31,13 @@ def main():
         unit_divisor=1024,
         dynamic_ncols=True,
         bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]',
-        desc=args.desc
+        desc=args.desc,
+        leave=False        # <- Do not leave final bar when done
     )
-
+    
+    # Avoid printing a newline or clearing
+    pbar.close = lambda: None
+    
     try:
         while True:
             chunk = sys.stdin.buffer.read(args.chunk)
