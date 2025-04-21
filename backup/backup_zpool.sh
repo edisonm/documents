@@ -1,20 +1,54 @@
 info_dir=crbackup
 
+declare -A host_snapshot
+declare -A host_snapshots
+
+add_host_snapshot () {
+    host_snapshot[${1},${2}]=1
+    host_snapshots[${1},${2%@*}]="`( for i in ${host_snapshots[${1},${2%@*}]} ; do echo $i ; done ; echo ${2##*@} ) | sort -u`"
+}
+
+del_host_snapshot () {
+    host_snapshot[${1},${2}]=0
+    host_snapshots[${1},${2%@*}]="`for i in ${host_snapshots[${1},${2%@*}]} ; do if [ ${i} != ${2##*@} ] ; then echo $i ; fi ; done`"
+}
+
+update_hosts_snapshots () {
+    while read -r host ; do
+        host_ssh="`ssh_host ${host}`"
+        while read -r snapshot ; do
+            add_host_snapshot ${host} ${snapshot}
+        done < <(( ${host_ssh} zfs list -pHt snapshot -o name 2>/dev/null < /dev/null))
+    done < <(( forall_mediahosts \
+                   echo_mediahost ; \
+               forall_backjobs \
+                   echo_sendhost ; \
+             ) | sort -u)
+}
+
+update_host_snapshots () {
+    while read -r snapshot ; do
+        add_host_snapshot ${1} ${snapshot}
+    done < <(( ${2} zfs list -prHt snapshot -o name ${3} | grep "@${4}" 2>/dev/null < /dev/null ))
+}
+
 snapshot_zpool () {
     snapshot=${send_pool}${send_zfs}@${snprefix}${currsnap}
-    local host_snap=`echo "${host_snapshots[${send_host}]}" | grep "^${snapshot}"`
-    if [ "${host_snap}" = "" ] ; then
+    if [ "${host_snapshot[${send_host},${snapshot}]}" != "1" ] ; then
 	dryer ${send_ssh} zfs snapshot -r ${snapshot}
+        # next line is NOT REDUNDANT if drying is true:
+        add_host_snapshot ${send_host} ${snapshot}
+        update_host_snapshots "${send_host}" "${send_ssh}" "${send_pool}${send_zfs}" "${snprefix}${currsnap}"
     fi
 }
 
 zfs_destroy () {
     ssh_snap="`ssh_host ${1}`"
-    # if [ "${dryrun}" != 1 ]; then
-    while read -r snapshot ; do
-	dryer ${ssh_snap} zfs destroy ${dropopts} ${snapshot} 2>/dev/null < /dev/null || true
-    done < <((echo "${host_snapshots[${1}]}" | grep "^${2}@${3}"))
-    # fi
+    snapshot="${2}@${3}"
+    if [ "${host_snapshot[${1},${snapshot}]}" = "1" ] ; then
+        dryer ${ssh_snap} zfs destroy "${snapshot}" 2>/dev/null < /dev/null || true
+        del_host_snapshot ${1} ${snapshot}
+    fi
 }
 
 destroy_snapshot_zpool () {
@@ -22,10 +56,7 @@ destroy_snapshot_zpool () {
 }
 
 sendsnap0_zpool () {
-    echo "${host_snapshots[${send_host}]}" | grep "^${send_zpoolfs}@" | \
-        sed -e "s:${send_zpoolfs}@::g" | sort -u
-    # ${send_ssh} zfs list -Ht snapshot -o name ${send_zpoolfs} 2>/dev/null | \
-    #     sed -e "s:${send_zpoolfs}@::g" | sort -u
+    echo "${host_snapshots[${send_host},${send_zpoolfs}]}"
 }
 
 recvsnap0_zpool () {
@@ -33,10 +64,7 @@ recvsnap0_zpool () {
 }
 
 recvsnap0_zpool_clone () {
-    echo "${host_snapshots[${recv_host}]}" | grep ${recv_zpoolfs}${send_zfs} | \
-        sed -e "s:${recv_zpoolfs}${send_zfs}@::g" | sort -u
-    # ${recv_ssh} zfs list -Ht snapshot -o name ${recv_zpoolfs}${send_zfs} 2>/dev/null | \
-    #     sed -e "s:${recv_zpoolfs}${send_zfs}@::g" | sort -u
+    echo "${host_snapshots[${recv_host},${recv_zpoolfs}${send_zfs}]}"
 }
 
 recvsnap0_zpool_zdump () {
@@ -184,6 +212,7 @@ backup_zpool_clone () {
     ( dryern ${send_ssh} zfs send -c ${sendopts} ${send_zpoolfs}@${snprefix}${currsnap} \
           | ${progress_cmd} \
           | dryerp ${recv_ssh} zfs recv -d -F ${recv_zpoolfs} ) || true
+    update_host_snapshots "${recv_host}" "${recv_ssh}" "${recv_zpoolfs}${send_zfs}" "${snprefix}${currsnap}"
 }
 
 backup_zpool_zdump () {

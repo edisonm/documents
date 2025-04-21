@@ -741,20 +741,6 @@ echo_sendhost () {
     echo ${send_host}
 }
 
-declare -A host_snapshots
-
-update_host_snapshots () {
-    echo "# update snapshot lists"
-    while read -r host ; do
-        host_ssh="`ssh_host ${host}`"
-        host_snapshots[${host}]="`${host_ssh} zfs list -pHt snapshot -o name 2>/dev/null < /dev/null`"
-    done < <(( forall_mediahosts \
-                   echo_mediahost ; \
-               forall_backjobs \
-                   echo_sendhost ; \
-             ) | sort -u)
-}
-
 benchmarking () {
     echo "# empty loop"
     forall_zjobs \
@@ -819,7 +805,7 @@ restores () {
 
 cleanup_restore () {
     media_fmt=`recv_fmt ${media_pool}`
-    cleanup_restore_${media_fmt}
+    nodry cleanup_restore_${media_fmt}
 }
 
 cleanup_restore_clone () {
@@ -1359,13 +1345,12 @@ all () {
     echo "# Backup began at `date`"
     echo "# Connecting"
     connect
-    update_host_snapshots
+    echo "# update snapshot lists"
+    update_hosts_snapshots
     echo "# Taking snapshots to get statistics right"
     hotrun snapshots
-    update_host_snapshots
     echo "# Applying retention policy"
     exec_smartretp
-    update_host_snapshots
     echo "# Calculating totals"
     calc_totals
     echo "# Creating backups: ${send_files} objects / `byteconv ${send_total}`"
@@ -1377,7 +1362,6 @@ all () {
     bak_infos
     echo "# generate fixmount_*.sh to restore the attributes of the filesystem"
     fixmounts
-    nodry update_host_snapshots
     echo "# Logging backup"
     backup_log
     echo "# Show backup history"
