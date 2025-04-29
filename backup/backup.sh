@@ -170,7 +170,8 @@ test_backjobs_loop () {
 test_backjobs () {
     forall_backjobs \
         forall_recv \
-        zfs_prev sendsnap \
+        zfs_prev \
+        sendsnap \
         test_backjobs_loop
 }
 
@@ -366,11 +367,17 @@ dropsnaps () {
     # Note: duplicated calls are handled by destroy_snapshot, so don't try to
     # optimize this here
     dropopts="-r"
-    
-    forall_backjobs \
-        destroy_send_dropsnap ${dropsnaps}
 
     forall_backjobs \
+        destroy_send_recv_dropsnap ${dropsnaps}
+}
+
+destroy_send_recv_dropsnap () {
+    send_unfold=1 \
+        zfs_prev_${fstype} \
+        destroy_send_dropsnap ${dropsnaps}
+    
+    send_unfold=1 \
         forall_recv \
         destroy_recv_dropsnap ${dropsnaps}
 }
@@ -379,7 +386,7 @@ destroy_recv_dropsnap () {
     destroy_recv_dropsnap_${recv_fmt} $*
 }
 
-exec_smartretp () {
+smartretp () {
     if [ "${smartretp}" = 1 ] ; then
         forall_backjobs \
             destroy_send_recv_smartretp
@@ -414,13 +421,13 @@ destroy_recv_smartretp_top () {
     # Next command means: keep initsnap, prevsnap, currsnap, and last 2.
     # initsnap must be kept to avoid a full backup in case it is removed.
     recvsnap="`recvsnap|tail -n +2|head -n -2`"
-    recv_dropsnaps=`smartretp ${recvsnap}`
+    recv_dropsnaps=`smartretp_snap ${recvsnap}`
     destroy_recv_dropsnap ${recv_dropsnaps} ${dropsnaps}
 }
 
 destroy_send_smartretp () {
     sendsnap="`sendsnap|tail -n +2|head -n -2`"
-    send_dropsnaps=`smartretp ${sendsnap}`
+    send_dropsnaps=`smartretp_snap ${sendsnap}`
     destroy_send_dropsnap ${send_dropsnaps} ${dropsnaps}
 }
 
@@ -1280,7 +1287,7 @@ declare -A per_y
 # 1 backup per month for 1 year,
 # 1 backup per year forever
 
-smartretp () {
+smartretp_snap () {
     curr_timestamp=`date '+%s'`
     for snapshot in $* ; do
         # yymmddHHMM
@@ -1350,7 +1357,7 @@ all () {
     echo "# Taking snapshots to get statistics right"
     hotrun snapshots
     echo "# Applying retention policy"
-    exec_smartretp
+    smartretp
     echo "# Calculating totals"
     calc_totals
     echo "# Creating backups: ${send_files} objects / `byteconv ${send_total}`"
@@ -1401,7 +1408,28 @@ main () {
     if [ "$*" = "" ] ; then
         dryrun all
     else
-	$*
+        command="$1"
+        shift
+        case "${command}" in
+            dryrun)
+                dryrun $*
+                ;;
+            all)
+                all $*
+                ;;
+            connect)
+                connect
+                ;;
+            snapshots)
+                snapshots
+                ;;
+            dropsnaps)
+                dropsnaps $*
+                ;;
+            *)
+                help
+                ;;
+        esac
     fi
 }
 

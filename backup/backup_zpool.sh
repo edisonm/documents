@@ -32,12 +32,17 @@ update_host_snapshots () {
     done < <(( ${2} zfs list -prHt snapshot -o name ${3} | grep "@${4}" 2>/dev/null < /dev/null ))
 }
 
+host_snapshot () {
+    # [ "${host_snapshot[${ssh_snap},${2}]}" = "1" ]
+    [ "`${1} zfs list -pHt snapshot -o name ${2} 2>/dev/null`" != "" ]
+}
+
 snapshot_zpool () {
     snapshot=${send_pool}${send_zfs}@${snprefix}${currsnap}
-    if [ "${host_snapshot[${send_host},${snapshot}]}" != "1" ] ; then
+    if ! host_snapshot "${send_ssh}" "${snapshot}" ; then
 	dryer ${send_ssh} zfs snapshot -r ${snapshot}
         # next line is NOT REDUNDANT if drying is true:
-        add_host_snapshot ${send_host} ${snapshot}
+        add_host_snapshot "${send_host}" "${snapshot}"
         update_host_snapshots "${send_host}" "${send_ssh}" "${send_pool}${send_zfs}" "${snprefix}${currsnap}"
     fi
 }
@@ -45,7 +50,7 @@ snapshot_zpool () {
 zfs_destroy () {
     ssh_snap="`ssh_host ${1}`"
     snapshot="${2}@${3}"
-    if [ "${host_snapshot[${1},${snapshot}]}" = "1" ] ; then
+    if host_snapshot "${ssh_snap}" "${snapshot}" ; then
         dryer ${ssh_snap} zfs destroy "${snapshot}" 2>/dev/null < /dev/null || true
         del_host_snapshot ${1} ${snapshot}
     fi
