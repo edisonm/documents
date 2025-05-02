@@ -1426,6 +1426,17 @@ main () {
             dropsnaps)
                 dropsnaps $*
                 ;;
+            show_history)
+                update_hosts_snapshots
+                show_history
+                ;;
+            statistics)
+                update_hosts_snapshots
+                calc_totals
+                backup_log
+                # show_history
+                statistics
+                ;;
             *)
                 help
                 ;;

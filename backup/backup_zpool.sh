@@ -27,6 +27,8 @@ update_hosts_snapshots () {
 }
 
 update_host_snapshots () {
+    # next line is NOT REDUNDANT if drying is true:
+    add_host_snapshot "${1}" "${3}@${4}"
     while read -r snapshot ; do
         add_host_snapshot ${1} ${snapshot}
     done < <(( ${2} zfs list -prHt snapshot -o name ${3} | grep "@${4}" 2>/dev/null < /dev/null ))
@@ -41,8 +43,6 @@ snapshot_zpool () {
     snapshot=${send_pool}${send_zfs}@${snprefix}${currsnap}
     if ! host_snapshot "${send_ssh}" "${snapshot}" ; then
 	dryer ${send_ssh} zfs snapshot -r ${snapshot}
-        # next line is NOT REDUNDANT if drying is true:
-        add_host_snapshot "${send_host}" "${snapshot}"
         update_host_snapshots "${send_host}" "${send_ssh}" "${send_pool}${send_zfs}" "${snprefix}${currsnap}"
     fi
 }
