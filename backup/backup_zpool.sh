@@ -1,3 +1,5 @@
+#!/bin/bash
+
 info_dir=crbackup
 
 declare -A host_snapshot
@@ -206,7 +208,9 @@ update_zpool_zdump_file_1 () {
         update_send_total_1
     elif [ "${zdumpext}" = "raz" ] && recv_file_exists "full_${1}.raw" && ! recv_file_exists "full_${1}.raz" ; then
 	snapshot_size=`${recv_ssh} "stat -c '%s' ${recv_dir}/full_${1}.raw"`
-	update_send_total_1
+        if [ $((${snapshot_size} < ${recv_size[${recv_hostpool}]})) != 0 ] ; then
+	    update_send_total_1
+        fi
     fi
 }
 
@@ -216,9 +220,11 @@ update_zpool_zdump_file_2 () {
     if ! recv_file_exists "full_${1}.ra[wz]" ; then
         snapshot_size="`snapshot_size_zpool_2 ${1} ${2}`"
         update_send_total_1
-    elif [ "${zdumpext}" = "raz" ] && recv_file_exists "incr_${1}_${2}.raw" && ! recv_file_exists "incr_${1}.raz" ; then
+    elif [ "${zdumpext}" = "raz" ] && recv_file_exists "incr_${1}_${2}.raw" && ! recv_file_exists "incr_${1}_${2}.raz" ; then
 	snapshot_size=`${recv_ssh} "stat -c '%s' ${recv_dir}/incr_${1}_${2}.raw"`
-	update_send_total_1
+        if [ $((${snapshot_size} < ${recv_size[${recv_hostpool}]})) != 0 ] ; then
+	    update_send_total_1
+        fi
     fi
 }
 
@@ -290,8 +296,8 @@ backup_zpool_zdump_file_1 () {
     recv_name="full_${1}.${zdumpext}"
     recv_file="${recv_dir}/${recv_name}"
     if ! recv_file_exists "full_${1}.ra[wz]" ; then
-        snapshot_size="`snapshot_size_zpool_1 ${1}`"
         ifdry echo "# Saving ${recv_file}"
+        snapshot_size="`snapshot_size_zpool_1 ${1}`"
         set_progress_cmd
         ( dryern ${send_ssh} zfs send -c ${send_zpoolfs}@${snprefix}${1} \
               | ${progress_cmd} \
@@ -299,14 +305,19 @@ backup_zpool_zdump_file_1 () {
         dryer ${recv_ssh} "rm -f ${recv_dir}/full_\*.ra[wz] ; mv ${recv_file}-partial ${recv_file}"
         nodry fix_totals
     elif [ "${zdumpext}" = "raz" ] && recv_file_exists "full_${1}.raw" && ! recv_file_exists "full_${1}.raz" ; then
-	ifdry echo "# Compressing existing dump to ${recv_file}"
-	( dryern ${recv_ssh} cat ${recv_dir}/full_${1}.raw \
-              | ${progress_cmd} \
-              | dryerp ${recv_ssh} "${ziper} > ${recv_file}-partial" ) || exit 1
-        dryer ${recv_ssh} mv ${recv_file}-partial ${recv_file}
-        dryer ${recv_ssh} rm -f ${recv_dir}/full_${1}.raw
-	nodry fix_totals
-	# dryer ${recv_ssh} "lrzip -D ${recv_dir}/full_${1}.raw -o ${recv_file}"
+        snapshot_size=`${recv_ssh} "stat -c '%s' ${recv_dir}/full_${1}.raw"`
+        if [ $((${snapshot_size} < ${recv_size[${recv_hostpool}]})) != 0 ] ; then
+	    ifdry echo "# Compressing existing dump to ${recv_file}"
+	    set_progress_cmd
+            ( dryern ${recv_ssh} cat ${recv_dir}/full_${1}.raw \
+                  | ${progress_cmd} \
+                  | dryerp ${recv_ssh} "${ziper} > ${recv_file}-partial" ) || exit 1
+            dryer ${recv_ssh} "rm -f ${recv_dir}/full_${1}.raw ; mv ${recv_file}-partial ${recv_file}"
+	    nodry fix_totals
+	    # dryer ${recv_ssh} "lrzip -D ${recv_dir}/full_${1}.raw -o ${recv_file}"
+        else
+            echo "# Skip ${recv_host}:${recv_dir}/full_${1}.raw compression (`byteconv ${snapshot_size}` is too big)"
+        fi
     fi
 }
 
@@ -324,8 +335,8 @@ backup_zpool_zdump_file_2 () {
     recv_name="incr_${1}_${2}.${zdumpext}"
     recv_file="${recv_dir}/${recv_name}"
     if ! recv_file_exists "incr_${1}_${2}.ra[wz]" ; then
-        snapshot_size="`snapshot_size_zpool_2 ${1} ${2}`"
         ifdry echo "# Saving ${recv_file}"
+        snapshot_size="`snapshot_size_zpool_2 ${1} ${2}`"
         set_progress_cmd
         ( dryern ${send_ssh} zfs send -c -I \
                  ${send_zpoolfs}@${snprefix}${1} \
@@ -349,15 +360,20 @@ backup_zpool_zdump_file_2 () {
         done
         dryer ${recv_ssh} mv ${recv_file}-partial ${recv_file}
 	nodry fix_totals
-    elif [ "${zdumpext}" = "raz" ] && recv_file_exists "incr_${1}_${2}.raw" && ! recv_file_exists "incr_${1}.raz" ; then
-	ifdry echo "# Compressing existing dump to ${recv_file}"
-	( dryern ${recv_ssh} cat ${recv_dir}/incr_${1}_${2}.raw \
-              | ${progress_cmd} \
-              | dryerp ${recv_ssh} "${ziper} > ${recv_file}-partial" ) || exit 1
-        dryer ${recv_ssh} mv ${recv_file}-partial ${recv_file}
-	dryer ${recv_ssh} rm -f ${recv_dir}/incr_${1}_${2}.raw
-	nodry fix_totals
-	# dryer ${recv_ssh} "lrzip -D ${recv_dir}/incr_${1}_${2}.raw -o ${recv_file}"
+    elif [ "${zdumpext}" = "raz" ] && recv_file_exists "incr_${1}_${2}.raw" && ! recv_file_exists "incr_${1}_${2}.raz" ; then
+        snapshot_size=`${recv_ssh} "stat -c '%s' ${recv_dir}/incr_${1}_${2}.raw"`
+        if [ $((${snapshot_size} < ${recv_size[${recv_hostpool}]})) != 0 ] ; then
+	    ifdry echo "# Compressing existing dump to ${recv_file}"
+	    set_progress_cmd
+	    ( dryern ${recv_ssh} cat ${recv_dir}/incr_${1}_${2}.raw \
+                  | ${progress_cmd} \
+                  | dryerp ${recv_ssh} "${ziper} > ${recv_file}-partial" ) || exit 1
+	    dryer ${recv_ssh} "rm -f ${recv_dir}/incr_${1}_${2}.raw ; mv ${recv_file}-partial ${recv_file}"
+	    nodry fix_totals
+	    # dryer ${recv_ssh} "lrzip -D ${recv_dir}/incr_${1}_${2}.raw -o ${recv_file}"
+        else
+            echo "# Skip ${recv_host}:${recv_dir}/incr_${1}_${2}.raw compression (`byteconv ${snapshot_size}` is too big)"
+        fi
     fi
 }
 

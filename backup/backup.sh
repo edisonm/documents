@@ -555,6 +555,10 @@ declare -A send_recv
 declare -A width
 declare -A recv_size
 
+update_size_ () {
+    recv_size[${recv_hostpool}]=`recv_size`
+}
+
 update_size () {
     recv_size[${recv_hostpool}]=`recv_size`
     if [ "${send_host}:${send_zpoolfs}" != "${recv_host}:${recv_zpoolfs}${send_zfs}" ] ; then
@@ -729,6 +733,17 @@ restore_sh () {
 calc_totals () {
     send_total=0
     send_files=0
+    
+    unset recv_hosts
+    declare -A recv_hosts
+    unset recv_pools
+    declare -A recv_pools
+    unset recv_fstype
+    declare -A recv_fstype
+
+    forall_zjobs \
+        set_recv_hostpools \
+        update_size_
 
     forall_zjobs \
         zfs_wrapr \
@@ -767,7 +782,7 @@ backups () {
     nodry echo
 
     if [ "${send_total}" != "${send_offset}" ] ; then
-        echo "ERROR: Total and Offset bytes doesn't match at the end: ${send_total} != ${send_offset}" 1>&2
+        echo "ERROR: Total and Offset bytes don't match at the end: ${send_total} != ${send_offset}" 1>&2
     fi
 }
 
