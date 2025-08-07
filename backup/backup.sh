@@ -349,9 +349,9 @@ destroy_recv_dropsnap_zdump () {
     recv_dir="/mnt/${recv_zpool}/crbackup${recv_zfs}${send_zfs}"
     for dropsnap in $* ; do
         recv_ssh="`ssh_host ${recv_host}`"
-        dropfiles=$(${recv_ssh} find ${recv_dir} -name full_${dropsnap}.raw \
-                                -o -name incr_${dropsnap}_"'*'".raw \
-                                -o -name incr_"'*'"_${dropsnap}.raw)
+        dropfiles=$(${recv_ssh} find ${recv_dir} -name full_${dropsnap}.ra[wz] \
+                                -o -name incr_${dropsnap}_"'*.ra[wz]'" \
+                                -o -name incr_"'*'"_${dropsnap}"'.ra[wz]'")
         for dropfile in ${dropfiles} ; do
             dryer ${recv_ssh} " mv ${dropfile} ${dropfile}-cleanup"
         done
@@ -847,8 +847,12 @@ restore_job () {
     send_zfs="\${3}"
     back_dir="/mnt/\${recv_zpool}/crbackup\${recv_zfs}\${send_zfs}"
     back_size="\`stat -c '%s' \${back_dir}/\${recv_file}\`"
-    for recv_file in \`cd \${back_dir} ; ls *.raw\` ; do
-        cat \${back_dir}/\${recv_file} | pv -pers \${back_size} | zfs recv -d -F \${rest_zpool}\${send_zfs} ;
+    for recv_file in \`cd \${back_dir} ; ls *.ra[wz]\` ; do
+        if [ "${recv_file##*.}" = raz ] ; then
+	    ziper="lrz -d"
+	else
+	    ziper="cat"
+        ${ziper} \${back_dir}/\${recv_file} | pv -pers \${back_size} | zfs recv -d -F \${rest_zpool}\${send_zfs} ;
     done
     for recv_sdir in \`cd \${back_dir} ; ls -p | grep /$ | sed 's:/$::g'\` ; do
         ( restore_job \${rest_zpool} \${recv_zfs} \${send_zfs}/\${recv_sdir} )
@@ -936,6 +940,14 @@ crypt_close () {
     if ${media_ssh} test -e /dev/mapper/crbackup_${volume} ; then
         dryer ${media_ssh} cryptsetup luksClose crbackup_${volume}
     fi
+}
+
+disconnect_help () {
+    cat <<EOF
+$0 disconnect
+Close the zfs pools that contain the medias and encrypt them
+
+EOF
 }
 
 disconnect () {
@@ -1400,6 +1412,7 @@ help () {
     help_help
     all_help
     connect_help
+    disconnect_help
     snapshots_help
     show_history_help
 }
@@ -1420,6 +1433,9 @@ main () {
             connect)
                 connect
                 ;;
+	    disconnect)
+		disconnect
+		;;
             snapshots)
                 snapshots
                 ;;
