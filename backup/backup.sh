@@ -349,9 +349,9 @@ destroy_recv_dropsnap_zdump () {
     recv_dir="/mnt/${recv_zpool}/crbackup${recv_zfs}${send_zfs}"
     for dropsnap in $* ; do
         recv_ssh="`ssh_host ${recv_host}`"
-        dropfiles=$(${recv_ssh} find ${recv_dir} -name full_${dropsnap}.ra[wz] \
-                                -o -name incr_${dropsnap}_"'*.ra[wz]'" \
-                                -o -name incr_"'*'"_${dropsnap}"'.ra[wz]'")
+        dropfiles=$(${recv_ssh} find ${recv_dir} -name full_${dropsnap}.ra[wzt] \
+                                -o -name incr_${dropsnap}_"'*.ra[wzt]'" \
+                                -o -name incr_"'*'"_${dropsnap}"'.ra[wzt]'")
         for dropfile in ${dropfiles} ; do
             dryer ${recv_ssh} " mv ${dropfile} ${dropfile}-cleanup"
         done
@@ -862,11 +862,14 @@ restore_job () {
     send_zfs="\${3}"
     back_dir="/mnt/\${recv_zpool}/crbackup\${recv_zfs}\${send_zfs}"
     back_size="\`stat -c '%s' \${back_dir}/\${recv_file}\`"
-    for recv_file in \`cd \${back_dir} ; ls *.ra[wz]\` ; do
+    for recv_file in \`cd \${back_dir} ; ls *.ra[wzt]\` ; do
         if [ "${recv_file##*.}" = raz ] ; then
-	    ziper="lrz -d"
-	else
+	    ziper="lrz -dc"
+	elif [ "${recv_file##*.}" = rat ] ; then
+            ziper="zstd -T0 -dcf"
+        else
 	    ziper="cat"
+        fi
         ${ziper} \${back_dir}/\${recv_file} | pv -pers \${back_size} | zfs recv -d -F \${rest_zpool}\${send_zfs} ;
     done
     for recv_sdir in \`cd \${back_dir} ; ls -p | grep /$ | sed 's:/$::g'\` ; do

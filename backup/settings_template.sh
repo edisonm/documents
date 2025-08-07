@@ -22,9 +22,11 @@ recvformats=""
 # Use zdumpext to control the compression of the raw files.  Also
 # specifies the extension of the raw files to help to identify them
 # - raz: The file will be compressed via lrz
+# - rat: The file will be compressed via zstd
 # - raw: No compression is applied
 
 zdumpext=raz
+# zdumpext=rat
 # zdumpext=raw
 
 # Temporary cache's to speed-up the backup, usually in fixed SSD drives, that is

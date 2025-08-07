@@ -9,6 +9,8 @@ if [ "${zdumpext}" = "raw" ] ; then
     ziper="cat"
 elif [ "${zdumpext}" = "raz" ] ; then
     ziper="lrz -c"
+elif [ "${zdumpext}" = "rat" ] ; then
+    ziper="zstd -T0 -5 -zcf"
 fi
 
 add_host_snapshot () {
@@ -82,7 +84,7 @@ recvsnap0_zpool_clone () {
 
 recvsnap0_zpool_zdump () {
     ${recv_ssh} ls -p /mnt/${recv_pool}/crbackup${recv_zfs}${send_zfs} 2>/dev/null | grep -v /$ | \
-        sed -e 's:.*_\(.*\)\.ra[wz]:'${snprefix}'\1:g'
+        sed -e 's:.*_\(.*\)\.ra[wzt]:'${snprefix}'\1:g'
 }
 
 zfs_prev_zpool () {
@@ -171,7 +173,7 @@ update_zpool_zdump () {
 
 update_zpool_zdump_1 () {
     recv_dir="/mnt/${recv_zpool}/crbackup${recv_zfs}${send_zfs}"
-    recv_files="`${recv_ssh} "cd ${recv_dir} ; ls *_*.ra[wz]" 2>/dev/null || true`"
+    recv_files="`${recv_ssh} "cd ${recv_dir} ; ls *_*.ra[wzt]" 2>/dev/null || true`"
     update_zpool_zdump_full `sendsnap`
 }
 
@@ -203,10 +205,10 @@ recv_file_exists () {
 update_zpool_zdump_file_1 () {
     recv_name="full_${1}.${zdumpext}"
     recv_file="${recv_dir}/${recv_name}"
-    if ! recv_file_exists "full_${1}.ra[wz]" ; then
+    if ! recv_file_exists "full_${1}.ra[wzt]" ; then
         snapshot_size="`snapshot_size_zpool_1 ${1}`"
         update_send_total_1
-    elif [ "${zdumpext}" = "raz" ] && recv_file_exists "full_${1}.raw" && ! recv_file_exists "full_${1}.raz" ; then
+    elif [ "${zdumpext}" != "raw" ] && recv_file_exists "full_${1}.raw" ; then
 	snapshot_size=`${recv_ssh} "stat -c '%s' ${recv_dir}/full_${1}.raw"`
         if [ $((${snapshot_size} < ${recv_size[${recv_hostpool}]})) != 0 ] ; then
 	    update_send_total_1
@@ -217,10 +219,10 @@ update_zpool_zdump_file_1 () {
 update_zpool_zdump_file_2 () {
     recv_name="incr_${1}_${2}.${zdumpext}"
     recv_file="${recv_dir}/${recv_name}"
-    if ! recv_file_exists "full_${1}.ra[wz]" ; then
+    if ! recv_file_exists "full_${1}.ra[wzt]" ; then
         snapshot_size="`snapshot_size_zpool_2 ${1} ${2}`"
         update_send_total_1
-    elif [ "${zdumpext}" = "raz" ] && recv_file_exists "incr_${1}_${2}.raw" && ! recv_file_exists "incr_${1}_${2}.raz" ; then
+    elif [ "${zdumpext}" != "raw" ] && recv_file_exists "incr_${1}_${2}.raw" ; then
 	snapshot_size=`${recv_ssh} "stat -c '%s' ${recv_dir}/incr_${1}_${2}.raw"`
         if [ $((${snapshot_size} < ${recv_size[${recv_hostpool}]})) != 0 ] ; then
 	    update_send_total_1
@@ -251,7 +253,7 @@ backup_zpool_zdump () {
 
 backup_zpool_zdump_1 () {
     recv_dir="/mnt/${recv_zpool}/crbackup${recv_zfs}${send_zfs}"
-    recv_files="`${recv_ssh} "cd ${recv_dir} ; ls *_*.ra[wz]" 2>/dev/null || true`"
+    recv_files="`${recv_ssh} "cd ${recv_dir} ; ls *_*.ra[wzt]" 2>/dev/null || true`"
     if ! ${recv_ssh} test -d ${recv_dir} ; then
         dryer ${recv_ssh} mkdir -p ${recv_dir}
     fi
@@ -262,14 +264,14 @@ backup_zpool_zdump_full () {
     snapshot1=${1}
     backup_zpool_zdump_file_1 ${snapshot1} || exit 1
     shift
-    snap_files="`${recv_ssh} "cd ${recv_dir} ; ls incr_*_*.ra[wz]" 2>/dev/null || true`"
+    snap_files="`${recv_ssh} "cd ${recv_dir} ; ls incr_*_*.ra[wzt]" 2>/dev/null || true`"
     for snapshot2 in $* ; do
         if [ $((${snapshot2}<=${currsnap})) = 1 ] ; then
             backup_zpool_zdump_file_2 ${snapshot1} ${snapshot2} || exit 1
         fi
         snapshot1=${snapshot2}
     done
-    for drop_file in `${recv_ssh} ls ${recv_dir}/*.ra[wz]-cleanup 2>/dev/null || true` ; do
+    for drop_file in `${recv_ssh} ls ${recv_dir}/*.ra[wzt]-cleanup 2>/dev/null || true` ; do
         dryer ${recv_ssh} "rm -f ${drop_file}"
     done
 }
@@ -295,16 +297,16 @@ backup_zpool_zdump_full () {
 backup_zpool_zdump_file_1 () {
     recv_name="full_${1}.${zdumpext}"
     recv_file="${recv_dir}/${recv_name}"
-    if ! recv_file_exists "full_${1}.ra[wz]" ; then
+    if ! recv_file_exists "full_${1}.ra[wzt]" ; then
         ifdry echo "# Saving ${recv_file}"
         snapshot_size="`snapshot_size_zpool_1 ${1}`"
         set_progress_cmd
         ( dryern ${send_ssh} zfs send -c ${send_zpoolfs}@${snprefix}${1} \
               | ${progress_cmd} \
               | dryerp ${recv_ssh} "${ziper} > ${recv_file}-partial" ) || exit 1
-        dryer ${recv_ssh} "rm -f ${recv_dir}/full_\*.ra[wz] ; mv ${recv_file}-partial ${recv_file}"
+        dryer ${recv_ssh} "rm -f ${recv_dir}/full_\*.ra[wzt] ; mv ${recv_file}-partial ${recv_file}"
         nodry fix_totals
-    elif [ "${zdumpext}" = "raz" ] && recv_file_exists "full_${1}.raw" && ! recv_file_exists "full_${1}.raz" ; then
+    elif [ "${zdumpext}" != "raw" ] && recv_file_exists "full_${1}.raw" ; then
         snapshot_size=`${recv_ssh} "stat -c '%s' ${recv_dir}/full_${1}.raw"`
         if [ $((${snapshot_size} < ${recv_size[${recv_hostpool}]})) != 0 ] ; then
 	    ifdry echo "# Compressing existing dump to ${recv_file}"
@@ -334,7 +336,7 @@ fix_totals () {
 backup_zpool_zdump_file_2 () {
     recv_name="incr_${1}_${2}.${zdumpext}"
     recv_file="${recv_dir}/${recv_name}"
-    if ! recv_file_exists "incr_${1}_${2}.ra[wz]" ; then
+    if ! recv_file_exists "incr_${1}_${2}.ra[wzt]" ; then
         ifdry echo "# Saving ${recv_file}"
         snapshot_size="`snapshot_size_zpool_2 ${1} ${2}`"
         set_progress_cmd
@@ -351,7 +353,7 @@ backup_zpool_zdump_file_2 () {
                 snap1="${snap1%%_*}"     # Remove everything after the next underscore
                 # Extract the second number
                 snap2="${drop_file##*_}" # Remove everything up to the last underscore
-                snap2="${snap2%.ra[wz]}" # Remove the file extension
+                snap2="${snap2%.ra[wzt]}" # Remove the file extension
                 # if a snapshot is between ${1} and ${2}, drop it:
                 if [ $((((${1}<=${snap1})&&(${snap1}<${2}))||((${1}<${snap2})&&(${snap2}<=${2})))) = 1 ] ; then
                     dryer ${recv_ssh} "rm -f ${recv_dir}/${drop_file}"
@@ -360,7 +362,7 @@ backup_zpool_zdump_file_2 () {
         done
         dryer ${recv_ssh} mv ${recv_file}-partial ${recv_file}
 	nodry fix_totals
-    elif [ "${zdumpext}" = "raz" ] && recv_file_exists "incr_${1}_${2}.raw" && ! recv_file_exists "incr_${1}_${2}.raz" ; then
+    elif [ "${zdumpext}" != "raw" ] && recv_file_exists "incr_${1}_${2}.raw" ; then
         snapshot_size=`${recv_ssh} "stat -c '%s' ${recv_dir}/incr_${1}_${2}.raw"`
         if [ $((${snapshot_size} < ${recv_size[${recv_hostpool}]})) != 0 ] ; then
 	    ifdry echo "# Compressing existing dump to ${recv_file}"
