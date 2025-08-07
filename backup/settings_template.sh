@@ -19,6 +19,14 @@ volumes=""
 # recvformat="hdump:clone hpool:zdump"
 recvformats=""
 
+# Use zdumpext to control the compression of the raw files.  Also
+# specifies the extension of the raw files to help to identify them
+# - raz: The file will be compressed via lrz
+# - raw: No compression is applied
+
+zdumpext=raz
+# zdumpext=raw
+
 # Temporary cache's to speed-up the backup, usually in fixed SSD drives, that is
 # why we can index them by [mediahost,media_pool]
 declare -A caches
