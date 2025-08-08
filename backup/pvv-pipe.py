@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import shutil
 import sys
 import argparse
 from tqdm import tqdm
@@ -23,13 +24,16 @@ def main():
     )
     args = parser.parse_args()
 
+    columns = shutil.get_terminal_size((80, 20)).columns
+
     pbar = tqdm(
         total=args.size,
         initial=args.offset,
         unit='B',
         unit_scale=True,
         unit_divisor=1024,
-        dynamic_ncols=True,
+        # dynamic_ncols=True,
+        ncols=columns,
         bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]',
         desc=args.desc,
         leave=False        # <- Do not leave final bar when done
