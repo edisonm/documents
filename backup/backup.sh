@@ -555,11 +555,11 @@ declare -A send_recv
 declare -A width
 declare -A recv_size
 
-update_size_ () {
+update_size () {
     recv_size[${recv_hostpool}]=`recv_size`
 }
 
-update_size () {
+update_size_fields () {
     recv_size[${recv_hostpool}]=`recv_size`
     if [ "${send_host}:${send_zpoolfs}" != "${recv_host}:${recv_zpoolfs}${send_zfs}" ] ; then
         send_recv[${send_hostpoolfs},${recv_hostpool}]="`snapshot_size`"
@@ -614,7 +614,7 @@ statistics () {
         zfs_wrapr \
         set_send_hostpoolsfs \
         set_recv_hostpools \
-        update_size
+        update_size_fields
 
     printf "%-*s" ${field1_maxw} "Source"
     
@@ -743,7 +743,7 @@ calc_totals () {
 
     forall_zjobs \
         set_recv_hostpools \
-        update_size_
+        update_size
 
     forall_zjobs \
         zfs_wrapr \

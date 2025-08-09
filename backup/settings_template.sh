@@ -25,9 +25,11 @@ recvformats=""
 # - rat: The file will be compressed via zstd
 # - raw: No compression is applied
 
-zdumpext=raz
-# zdumpext=rat
-# zdumpext=raw
+declare -A zdumpext
+
+# zdumpext[pool]=raz
+# zdumpext[pool]=raw
+zdumpext[back4]=rat
 
 # Temporary cache's to speed-up the backup, usually in fixed SSD drives, that is
 # why we can index them by [mediahost,media_pool]
