@@ -231,10 +231,15 @@ update_zpool_zdump_file () {
 backup_zpool_clone () {
     zfs_create_${recv_fmt}
     snapshot_size=$(snapshot_size)
-    ( dryern ${send_ssh} zfs send -c ${sendopts} ${send_zpoolfs}@${snprefix}${currsnap} \
-          | dryerp ${recv_ssh} "$(progress_cmd c) | zfs recv -d -F ${recv_zpoolfs}" ) || true
+    nodry fix_recv_size
+    if [ $((${snapshot_size} <= ${recv_size[${recv_hostpool}]})) != 0 ] ; then
+        ( dryern ${send_ssh} zfs send -c ${sendopts} ${send_zpoolfs}@${snprefix}${currsnap} \
+              | dryerp ${recv_ssh} "$(progress_cmd c) | zfs recv -d -F ${recv_zpoolfs}" ) || true
+        update_host_snapshots "${recv_host}" "${recv_ssh}" "${recv_zpoolfs}${send_zfs}" "${snprefix}${currsnap}"
+    else
+        echo "# Skip ${recv_zpoolfs}${send_zfs} clone: No space left on ${recv_hostpool} ($(byteconv ${snapshot_size}) > $(byteconv ${recv_size[${recv_hostpool}]}))"
+    fi
     update_send_offset
-    update_host_snapshots "${recv_host}" "${recv_ssh}" "${recv_zpoolfs}${send_zfs}" "${snprefix}${currsnap}"
 }
 
 backup_zpool_zdump () {
@@ -287,6 +292,12 @@ backup_zpool_zdump_full () {
 #     done
 # }
 
+fix_recv_size () {
+    if [ $((${snapshot_size} > ${recv_size[${recv_hostpool}]})) != 0 ] ; then
+        update_size
+    fi
+}
+
 # WARNING: Don't change prefixes full/incr, they are tweaked so that
 # full appears first, before incr when using ls to get the dump files,
 # which is required by the restore_job script to work properly.
@@ -299,14 +310,20 @@ backup_zpool_zdump_file () {
     if ! recv_file_exists "${recv_base}.ra[wzt]" ; then
         ifdry echo "# Saving ${recv_file}"
         snapshot_size="$(snapshot_size_intern_zpool $*)"
-        ( dryern ${send_ssh} zfs send -c $(send_opts $*) \
-              | dryerp ${recv_ssh} "$(progress_cmd d) | $(ziper $(zdumpext ${recv_pool})) > ${recv_file}-partial" ) || exit 1
-        backup_zpool_zdump_file_cleanup_$# $*
-        dryer ${recv_ssh} mv ${recv_file}-partial ${recv_file}
+        nodry fix_recv_size
+        if [ $((${snapshot_size} <= ${recv_size[${recv_hostpool}]})) != 0 ] ; then
+            ( dryern ${send_ssh} zfs send -c $(send_opts $*) \
+                  | dryerp ${recv_ssh} "$(progress_cmd d) | $(ziper $(zdumpext ${recv_pool})) > ${recv_file}-partial" ) || exit 1
+            backup_zpool_zdump_file_cleanup_$# $*
+            dryer ${recv_ssh} mv ${recv_file}-partial ${recv_file}
+            nodry fix_totals
+        else
+            echo "# Skip ${recv_file} dump: No space left on ${recv_hostpool} ($(byteconv ${snapshot_size}) > $(byteconv ${recv_size[${recv_hostpool}]}))"
+        fi
 	update_send_offset
-        nodry fix_totals
     elif [ "$(zdumpext ${recv_pool})" != "raw" ] && recv_file_exists "${recv_base}.raw" ; then
         snapshot_size=$(${recv_ssh} "stat -c '%s' ${recv_dir}/${recv_base}.raw")
+        nodry fix_recv_size
         if [ $((${snapshot_size} <= ${recv_size[${recv_hostpool}]})) != 0 ] ; then
 	    ifdry echo "# Compressing existing dump to ${recv_file}"
             ( dryer ${recv_ssh} "cat ${recv_dir}/${recv_base}.raw | $(progress_cmd z) | $(ziper $(zdumpext ${recv_pool})) > ${recv_file}-partial" ) || exit 1
@@ -315,7 +332,7 @@ backup_zpool_zdump_file () {
             nodry fix_totals
 	    # dryer ${recv_ssh} "lrzip -D ${recv_dir}/${recv_base}.raw -o ${recv_file}"
         else
-            echo "# Skip ${recv_host}:${recv_dir}/${recv_base}.raw compression ($(byteconv ${snapshot_size}) > $(byteconv ${recv_size[${recv_hostpool}]}))"
+            echo "# Skip ${recv_file} compression: No space left on ${recv_hostpool} ($(byteconv ${snapshot_size}) > $(byteconv ${recv_size[${recv_hostpool}]}))"
         fi
     fi
 }
