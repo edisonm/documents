@@ -218,7 +218,7 @@ update_zpool_zdump_file () {
     recv_name="${recv_base}.$(zdumpext ${recv_pool})"
     recv_file="${recv_dir}/${recv_name}"
     if ! recv_file_exists "${recv_base}.ra[wzt]" ; then
-        snapshot_size="$(snapshot_size_zpool $*)"
+        snapshot_size="$(snapshot_size_intern_zpool $*)"
         update_send_total
     elif [ "$(zdumpext ${recv_pool})" != "raw" ] && recv_file_exists "${recv_base}.raw" ; then
 	snapshot_size=$(${recv_ssh} "stat -c '%s' ${recv_dir}/${recv_base}.raw")
@@ -298,7 +298,7 @@ backup_zpool_zdump_file () {
     recv_file="${recv_dir}/${recv_name}"
     if ! recv_file_exists "${recv_base}.ra[wzt]" ; then
         ifdry echo "# Saving ${recv_file}"
-        snapshot_size="$(snapshot_size_zpool $*)"
+        snapshot_size="$(snapshot_size_intern_zpool $*)"
         ( dryern ${send_ssh} zfs send -c $(send_opts $*) \
               | dryerp ${recv_ssh} "$(progress_cmd d) | $(ziper $(zdumpext ${recv_pool})) > ${recv_file}-partial" ) || exit 1
         backup_zpool_zdump_file_cleanup_$# $*
@@ -364,6 +364,15 @@ backup_zpool_zdump_file_cleanup_2 () {
 }
 
 snapshot_size_zpool () {
+    size="$($send_ssh zfs send -nvPc ${sendopts} ${send_zpoolfs}@${snprefix}${currsnap} 2>/dev/null | grep size | awk '{print $2}')"
+    if [ "${size}" = "" ] ; then
+	echo 0
+    else
+	echo ${size}
+    fi
+}
+
+snapshot_size_intern_zpool () {
     size="$(${send_ssh} zfs send -nvPc $(send_opts $*) 2>/dev/null | grep size | awk '{print $2}')"
     if [ "${size}" = "" ] ; then
 	echo 0
