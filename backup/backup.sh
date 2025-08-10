@@ -33,7 +33,7 @@ LC_NUMERIC=C
 #   ARISING IN ANY WAY  OUT OF THE USE OF THIS SOFTWARE, EVEN  IF ADVISED OF THE
 #   POSSIBILITY OF SUCH DAMAGE.
 
-# The file ./settings_`hostname`.sh must define the next configuration parameters:
+# The file ./settings_$(hostname).sh must define the next configuration parameters:
 #
 # - A variable called volumes which contains a list of the UUID of all the
 #   luks encrypted backup meda
@@ -75,10 +75,10 @@ LC_NUMERIC=C
 #      ControlPath ~/.ssh/master-%r%h:%p
 #      ControlPersist 30
 
-. ./settings_`hostname`.sh
+. ./settings_$(hostname).sh
 . ./common.sh
 
-hostname=${hostname:-`hostname`}
+hostname=${hostname:-$(hostname)}
 
 . ./backup_zpool.sh
 . ./backup_btrfs.sh
@@ -92,17 +92,17 @@ snprefix=_bak_
 
 # max one snapshot per day:
 if [ "$max_frequency" = daily ] ; then
-    currsnap=${currsnap:-"`date +%y%m%d`"}
+    currsnap=${currsnap:-"$(date +%y%m%d)"}
 fi
 
 # max one snapshot per hour:
 if [ "$max_frequency" = hourly ] ; then
-    currsnap=${currsnap:-"`date +%y%m%d%H`"}
+    currsnap=${currsnap:-"$(date +%y%m%d%H)"}
 fi
 
 # max one snapshot per minute (not recommended for production):
 if [ "$max_frequency" = minute ] ; then
-    currsnap=${currsnap:-"`date +%y%m%d%H%M`"}
+    currsnap=${currsnap:-"$(date +%y%m%d%H%M)"}
 fi
 
 match_backup_snapshot_daily () {
@@ -176,7 +176,7 @@ test_backjobs () {
 }
 
 avail_ssh () {
-    do_ssh=`ssh_host ${1}`
+    do_ssh=$(ssh_host ${1})
     ${do_ssh} echo 1 2>/dev/null < /dev/null || echo 0
 }
 
@@ -189,7 +189,7 @@ forall_backjobs () {
         send_zpool=${send_pool}
         send_zpoolfs=${send_zpool}${send_zfs}
         send_host=${send_host}
-        send_ssh="`ssh_host ${send_host}`"
+        send_ssh="$(ssh_host ${send_host})"
         recv_pool=${recv_pool_uuid%@*}
         temp_uuid=${recv_pool_uuid##${recv_pool}}
         recv_uuid=${temp_uuid##@}
@@ -198,7 +198,7 @@ forall_backjobs () {
 	    recv_zfs="/${send_host}/${send_pool}"
 	fi
 	
-        if [ "`avail_ssh ${send_host}`" = 1 ] ; then
+        if [ "$(avail_ssh ${send_host})" = 1 ] ; then
             $* < /dev/null || true
         fi
     done < <(list_backjobs)
@@ -229,24 +229,24 @@ recv_fmt () {
 
 forall_recv () {
     if [ "${recv_pool}" = "" ] || [ "${recv_host}" = "" ] ; then
-        media_host_pools[${fstype}]="${media_host_pools[${fstype}]:-`media_host_pools ${fstype}`}"
+        media_host_pools[${fstype}]="${media_host_pools[${fstype}]:-$(media_host_pools ${fstype})}"
         for recv_host_pool in ${media_host_pools[${fstype}]} ; do
             recv_host=${recv_host_pool%:*}
 	    recv_pool=${recv_host_pool##*:}
             recv_zpool=${recv_pool}
-            recv_fmt=`recv_fmt ${recv_zpool}`
+            recv_fmt=$(recv_fmt ${recv_zpool})
             recv_zpoolfs=${recv_zpool}${recv_zfs}
-            recv_ssh="`ssh_host ${recv_host}`"
-            if [ "`avail_ssh ${recv_host}`" = 1 ] ; then
+            recv_ssh="$(ssh_host ${recv_host})"
+            if [ "$(avail_ssh ${recv_host})" = 1 ] ; then
                 $* < /dev/null
             fi
         done
     else
         recv_zpool=${recv_pool}
-        recv_fmt=`recv_fmt ${recv_zpool}`
+        recv_fmt=$(recv_fmt ${recv_zpool})
 	recv_zpoolfs=${recv_zpool}${recv_zfs}
-        recv_ssh="`ssh_host ${recv_host}`"
-        if [ "`avail_ssh ${recv_host}`" = 1 ] ; then
+        recv_ssh="$(ssh_host ${recv_host})"
+        if [ "$(avail_ssh ${recv_host})" = 1 ] ; then
             $* < /dev/null
         fi
     fi
@@ -266,12 +266,12 @@ forall_caches () {
 
 online_mediahosts () {
     for mediahostrow in ${mediahosts} ; do
-        mh_ssh="`ssh_host ${mediahostrow}`"
+        mh_ssh="$(ssh_host ${mediahostrow})"
         ${mh_ssh} echo ${mediahostrow} 2>/dev/null || true
     done
 }
 
-mediahosts=`online_mediahosts`
+mediahosts=$(online_mediahosts)
 
 list_mediahosts () {
     for mediahostrow in ${mediahosts} ; do
@@ -292,8 +292,8 @@ forall_zjobs () {
 
 forall_mediahosts () {
     while IFS=';' read -r mediahost ; do
-        media_ssh="`ssh_host ${mediahost}`"
-        if [ "`avail_ssh ${mediahost}`" = 1 ] ; then
+        media_ssh="$(ssh_host ${mediahost})"
+        if [ "$(avail_ssh ${mediahost})" = 1 ] ; then
             $* < /dev/null
         fi
     done < <(list_mediahosts)
@@ -348,7 +348,7 @@ destroy_recv_dropsnap_zdump () {
     # we only mark them wit the -cleanup extension
     recv_dir="/mnt/${recv_zpool}/crbackup${recv_zfs}${send_zfs}"
     for dropsnap in $* ; do
-        recv_ssh="`ssh_host ${recv_host}`"
+        recv_ssh="$(ssh_host ${recv_host})"
         dropfiles=$(${recv_ssh} find ${recv_dir} -name full_${dropsnap}.ra[wzt] \
                                 -o -name incr_${dropsnap}_"'*.ra[wzt]'" \
                                 -o -name incr_"'*'"_${dropsnap}"'.ra[wzt]'")
@@ -420,14 +420,14 @@ destroy_recv_smartretp_clone () {
 destroy_recv_smartretp_top () {
     # Next command means: keep initsnap, prevsnap, currsnap, and last 2.
     # initsnap must be kept to avoid a full backup in case it is removed.
-    recvsnap="`recvsnap|tail -n +2|head -n -2`"
-    recv_dropsnaps=`smartretp_snap ${recvsnap}`
+    recvsnap="$(recvsnap|tail -n +2|head -n -2)"
+    recv_dropsnaps=$(smartretp_snap ${recvsnap})
     destroy_recv_dropsnap ${recv_dropsnaps} ${dropsnaps}
 }
 
 destroy_send_smartretp () {
-    sendsnap="`sendsnap|tail -n +2|head -n -2`"
-    send_dropsnaps=`smartretp_snap ${sendsnap}`
+    sendsnap="$(sendsnap|tail -n +2|head -n -2)"
+    send_dropsnaps=$(smartretp_snap ${sendsnap})
     destroy_send_dropsnap ${send_dropsnaps} ${dropsnaps}
 }
 
@@ -463,7 +463,7 @@ listsnap () {
 
 prevsnap () {
     prevsnap=""
-    for snapshot in `$1` ; do
+    for snapshot in $($1) ; do
         if [ $((${snapshot}<${currsnap})) = 1 ] ; then
             prevsnap=${snapshot}
         fi
@@ -472,7 +472,7 @@ prevsnap () {
 }
 
 between () {
-    snapshots=`$1`
+    snapshots=$($1)
     lowersnap=$2
     uppersnap=$3
     for snapshot in ${snapshots} ; do
@@ -484,7 +484,7 @@ between () {
 }
 
 fromsnap () {
-    snapshots=`$1`
+    snapshots=$($1)
     lowersnap=$2
     for snapshot in ${snapshots} ; do
         if [ $((${lowersnap##${snprefix}}<=${snapshot##${snprefix}})) = 1 ] ; then
@@ -501,15 +501,15 @@ zfs_prev () {
     send_zpoolfs=${send_zpool}${send_zfs}
     prevcmd="$1"
     shift
-    prevsnap=`prevsnap ${prevcmd}`
+    prevsnap=$(prevsnap ${prevcmd})
     zfs_prev_${fstype} $*
 }
 
 zfs_wrapr () {
-    # hasprevs="`${recv_ssh} zfs list -Ho name ${recv_zpoolfs}${send_zfs}@${prevsnap}`"
-    # echo hasprevs="`recvsnap|grep "${prevsnap}"`" 1>&2
+    # hasprevs="$(${recv_ssh} zfs list -Ho name ${recv_zpoolfs}${send_zfs}@${prevsnap})"
+    # echo hasprevs="$(recvsnap|grep "${prevsnap}")" 1>&2
     # echo prevsnap="${prevsnap}" 1>&2
-    if [ "${prevsnap}" = "" ] || [ "`recvsnap|grep "${prevsnap}"`" = "" ] ; then
+    if [ "${prevsnap}" = "" ] || [ "$(recvsnap|grep "${prevsnap}")" = "" ] ; then
         action="# first full backup ${currsnap}"
         baktype=full
     else
@@ -525,13 +525,13 @@ requires_unfold () {
     for send_zpoolfs in ${send_zpoolfss} ; do
         case $1 in
             listsnap)
-                if [ "`sendsnap|grep ${prevsnap}`" = "" ] \
-                       || [ "`recvsnap|grep ${prevsnap}`" = "" ] ; then
+                if [ "$(sendsnap|grep ${prevsnap})" = "" ] \
+                       || [ "$(recvsnap|grep ${prevsnap})" = "" ] ; then
                     unfold=1
                 fi
             ;;
             *)
-                if [ "`${1}|grep ${prevsnap}`" = "" ] ; then
+                if [ "$(${1}|grep ${prevsnap})" = "" ] ; then
                     unfold=1
                 fi
             ;;
@@ -556,13 +556,13 @@ declare -A width
 declare -A recv_size
 
 update_size () {
-    recv_size[${recv_hostpool}]=`recv_size`
+    recv_size[${recv_hostpool}]=$(recv_size)
 }
 
 update_size_fields () {
-    recv_size[${recv_hostpool}]=`recv_size`
+    recv_size[${recv_hostpool}]=$(recv_size)
     if [ "${send_host}:${send_zpoolfs}" != "${recv_host}:${recv_zpoolfs}${send_zfs}" ] ; then
-        send_recv[${send_hostpoolfs},${recv_hostpool}]="`snapshot_size`"
+        send_recv[${send_hostpoolfs},${recv_hostpool}]="$(snapshot_size)"
     else
         send_recv[${send_hostpoolfs},${recv_hostpool}]="-"
     fi
@@ -619,17 +619,17 @@ statistics () {
     printf "%-*s" ${field1_maxw} "Source"
     
     for recv_hostpool in ${!recv_hosts[*]} ; do
-        width[${recv_hostpool}]=`lmax ${recv_size[${recv_hostpool}]} ${recv_hostpool}`
+        width[${recv_hostpool}]=$(lmax ${recv_size[${recv_hostpool}]} ${recv_hostpool})
         printf " %*s" ${width[${recv_hostpool}]} ${recv_hostpool}
         recv_stot[${recv_hostpool}]=0
     done
 
     printf "\n"
 
-    printf "%s" `repeatc ${field1_maxw} -`
+    printf "%s" $(repeatc ${field1_maxw} -)
 
     for recv_hostpool in ${!recv_hosts[*]} ; do
-        printf " %s" `repeatc ${width[${recv_hostpool}]} -`
+        printf " %s" $(repeatc ${width[${recv_hostpool}]} -)
     done
 
     printf "\n"
@@ -637,7 +637,7 @@ statistics () {
     for send_hostpoolfs in ${!send_hosts[*]} ; do
         printf "%-*s" ${field1_maxw} ${send_hostpoolfs}
         for recv_hostpool in ${!recv_hosts[*]} ; do
-            printf " %*s" ${width[${recv_hostpool}]} "`byteconv ${send_recv[${send_hostpoolfs},${recv_hostpool}]}`"
+            printf " %*s" ${width[${recv_hostpool}]} "$(byteconv ${send_recv[${send_hostpoolfs},${recv_hostpool}]})"
             if [ "${send_recv[${send_hostpoolfs},${recv_hostpool}]}" != "-" ] ; then
                 recv_stot[${recv_hostpool}]=$((${send_recv[${send_hostpoolfs},${recv_hostpool}]}+${recv_stot[${recv_hostpool}]}))
             fi
@@ -645,23 +645,23 @@ statistics () {
         printf "\n"
     done
 
-    printf "%s" `repeatc ${field1_maxw} -`
+    printf "%s" $(repeatc ${field1_maxw} -)
     
     for recv_hostpool in ${!recv_hosts[*]} ; do
-        printf " %s" `repeatc ${width[${recv_hostpool}]} -`
+        printf " %s" $(repeatc ${width[${recv_hostpool}]} -)
     done
     printf "\n"
 
     printf "%-*s" ${field1_maxw} "Total"
     for recv_hostpool in ${!recv_hosts[*]} ; do
-        printf " %*s" ${width[${recv_hostpool}]} "`byteconv ${recv_stot[${recv_hostpool}]}`"
+        printf " %*s" ${width[${recv_hostpool}]} "$(byteconv ${recv_stot[${recv_hostpool}]})"
     done
     printf "\n"
 
     overflow=0
     printf "%-*s" ${field1_maxw} "Free"
     for recv_hostpool in ${!recv_hosts[*]} ; do
-        printf " %*s" ${width[${recv_hostpool}]} "`byteconv ${recv_size[${recv_hostpool}]}`"
+        printf " %*s" ${width[${recv_hostpool}]} "$(byteconv ${recv_size[${recv_hostpool}]})"
         overflow=$((${overflow} || (${recv_stot[${recv_hostpool}]} > ${recv_size[${recv_hostpool}]})))
     done
     printf "\n"
@@ -700,20 +700,20 @@ zpool_list () {
 }
 
 update_total () {
-    if [ "`recvsnap|grep ${currsnap}`" = "" ] ; then
-        snapshot_size=`snapshot_size`
+    if [ "$(recvsnap|grep ${currsnap})" = "" ] ; then
+        snapshot_size=$(snapshot_size)
         update_${fstype}_${recv_fmt}
     fi
 }
 
 backup () {
-    if [ "`recvsnap|grep ${currsnap}`" = "" ] ; then
-        snapshot_size=`snapshot_size`
+    if [ "$(recvsnap|grep ${currsnap})" = "" ] ; then
+        snapshot_size=$(snapshot_size)
         echo -e "\r$action ${send_host}:${send_zpoolfs} to ${recv_host}:${recv_zpoolfs}"
         backup_${fstype}_${recv_fmt}
 	if [ "${send_unfolded}" = 0 ] ; then
 	    for send_zpoolfs in ${send_zpoolfss} ; do
-		# prevsnap=`prevsnap ${prevcmd}`
+		# prevsnap=$(prevsnap ${prevcmd})
 		# sendopts="-R"
 		# dropopts=""
 		send_zfs=${send_zpoolfs##${send_zpool}} offmount_${fstype}_${recv_fmt}
@@ -826,7 +826,7 @@ restores () {
 }
 
 cleanup_restore () {
-    media_fmt=`recv_fmt ${media_pool}`
+    media_fmt=$(recv_fmt ${media_pool})
     nodry cleanup_restore_${media_fmt}
 }
 
@@ -842,7 +842,7 @@ restore_job () {
     recv_zfs="\${2}"
     send_zfs="\${3}"
     back_zfs="\${recv_zpool}\${recv_zfs}\${send_zfs}"
-    back_size="\`(zfs send -nvPcR \${back_zfs}@${snprefix}\${currsnap} 2>/dev/null | grep size | awk '{print $2}')||echo 0\`"
+    back_size="\$((zfs send -nvPcR \${back_zfs}@${snprefix}\${currsnap} 2>/dev/null | grep size | awk '{print $2}')||echo 0)"
     zfs send -Rc \${back_zfs}@${snprefix}\${currsnap} | pv -pers \${back_size} | zfs recv -d -F \${rest_zpool}\${send_zfs}
 }
 
@@ -861,8 +861,8 @@ restore_job () {
     recv_zfs="\${2}"
     send_zfs="\${3}"
     back_dir="/mnt/\${recv_zpool}/crbackup\${recv_zfs}\${send_zfs}"
-    back_size="\`stat -c '%s' \${back_dir}/\${recv_file}\`"
-    for recv_file in \`cd \${back_dir} ; ls *.ra[wzt]\` ; do
+    back_size="\$(stat -c '%s' \${back_dir}/\${recv_file})"
+    for recv_file in \$(cd \${back_dir} ; ls *.ra[wzt]) ; do
         if [ "${recv_file##*.}" = raz ] ; then
 	    ziper="lrz -dc"
 	elif [ "${recv_file##*.}" = rat ] ; then
@@ -872,7 +872,7 @@ restore_job () {
         fi
         ${ziper} \${back_dir}/\${recv_file} | pv -pers \${back_size} | zfs recv -d -F \${rest_zpool}\${send_zfs} ;
     done
-    for recv_sdir in \`cd \${back_dir} ; ls -p | grep /$ | sed 's:/$::g'\` ; do
+    for recv_sdir in \$(cd \${back_dir} ; ls -p | grep /$ | sed 's:/$::g') ; do
         ( restore_job \${rest_zpool} \${recv_zfs} \${send_zfs}/\${recv_sdir} )
     done
 }
@@ -894,7 +894,7 @@ lambda () {
 }
 
 crypt_open () {
-    if [ "`${media_ssh} lsblk -o fstype,uuid|grep crypto_LUKS|awk '{print $2}'|grep ${volume}`" = "${volume}" ] \
+    if [ "$(${media_ssh} lsblk -o fstype,uuid|grep crypto_LUKS|awk '{print $2}'|grep ${volume})" = "${volume}" ] \
            && ! ( ${media_ssh} test -e /dev/mapper/crbackup_${volume} ) ; then
         cat /crypto_keyfile.bin | \
             ${media_ssh} cryptsetup luksOpen UUID=$volume crbackup_${volume} --key-file -
@@ -1000,9 +1000,9 @@ set_recv_hostpools () {
 }
 
 update_log () {
-    rsnapshots[${recv_hostpool}]="`( for rsnapshot in ${rsnapshots[${recv_hostpool}]} ; do \
+    rsnapshots[${recv_hostpool}]="$(( for rsnapshot in ${rsnapshots[${recv_hostpool}]} ; do \
                                        echo ${rsnapshot} ; \
-                                     done ; recvsnap ) | sort -u`"
+                                     done ; recvsnap ) | sort -u)"
 }
 
 recv_volumes () {
@@ -1023,10 +1023,10 @@ backup_log () {
         set_recv_hostpools \
         update_log
     for recv_hostpool in ${!recv_hosts[*]} ; do
-        recv_ssh=`ssh_host ${recv_hosts[${recv_hostpool}]}`
+        recv_ssh=$(ssh_host ${recv_hosts[${recv_hostpool}]})
         recv_zpool=${recv_pools[${recv_hostpool}]}
         fstype=${recv_fstype[${recv_hostpool}]}
-        for volume in `recv_volumes` ; do
+        for volume in $(recv_volumes) ; do
             echo "${recv_hosts[${recv_hostpool}]}:${recv_pools[${recv_hostpool}]}" > data/${volume}.dat
         done
         hostpool_file=data/${recv_hosts[${recv_hostpool}]}_${recv_pools[${recv_hostpool}]}.dat
@@ -1090,7 +1090,7 @@ declare -A send_snapshots
 
 update_send_pool () {
     if [ "${send_pool}" != "" ] ; then
-        send_snapshots["${send_host}:${send_zpoolfs}"]="`sendsnap`"
+        send_snapshots["${send_host}:${send_zpoolfs}"]="$(sendsnap)"
     fi
 }
 
@@ -1115,13 +1115,13 @@ show_history () {
     
     printf "No|Sources\n--+-------\n"
     zsid=0
-    send_hostpoolfss=`for w in ${!send_snapshots[*]} ; do echo $w; done|sort -u`
+    send_hostpoolfss=$(for w in ${!send_snapshots[*]} ; do echo $w; done|sort -u)
     for send_hostpoolfs in ${send_hostpoolfss} ; do
         printf "%2s|%s\n" "${zsid}" "${send_hostpoolfs}"
 	zsid=$((${zsid}+1))
     done
     zsin=${zsid}
-    recv_host_pools="`recv_host_pools|sort -u`"
+    recv_host_pools="$(recv_host_pools|sort -u)"
     zrid=0
     printf "\nNo|Targets\n--+-------\n"
     for recv_host_pool in $recv_host_pools ; do
@@ -1130,12 +1130,12 @@ show_history () {
     done
     zrin=${zrid}
 
-    printf "\n%-*s|" `lmax snapshot ${currsnap}` "Snapshot"
+    printf "\n%-*s|" $(lmax snapshot ${currsnap}) "Snapshot"
     printf "%-*s" "$((2*$zsin-1))" "Srcs"
     printf "|"
     printf "%s\n" "Targets"
     
-    printf "%-*s|" `lmax Snapshot ${currsnap}` "[${snprefix}]"
+    printf "%-*s|" $(lmax Snapshot ${currsnap}) "[${snprefix}]"
 
     for ((zsid=0;zsid<$((${zsin}-1));zsid++)) ; do
         printf "%-2s" "${zsid}"
@@ -1153,14 +1153,14 @@ show_history () {
     done
     
     printf "\n"
-    for curr_snapshot in `(send_snapshots;received_snapshots)|sort -u` ; do
-        printf "%-*s|" `lmax snapshot ${currsnap}` ${curr_snapshot##${snprefix}}
-	last_send_hostpoolfs="`last ${send_hostpoolfss}`"
+    for curr_snapshot in $((send_snapshots;received_snapshots)|sort -u) ; do
+        printf "%-*s|" $(lmax snapshot ${currsnap}) ${curr_snapshot##${snprefix}}
+	last_send_hostpoolfs="$(last ${send_hostpoolfss})"
         for send_hostpoolfs in ${send_hostpoolfss} ; do
-            if [ "`for snapshot in ${send_snapshots[${send_hostpoolfs}]} ; do \
+            if [ "$(for snapshot in ${send_snapshots[${send_hostpoolfs}]} ; do \
                        echo ${snapshot} ; \
                    done \
-                 | grep ${curr_snapshot}`" != "" ] ; then
+                 | grep ${curr_snapshot})" != "" ] ; then
                 volume_stat="X"
                 for dropsnap in ${send_dropsnaps} ${dropsnaps} ; do
                     if [ "${dropsnap}" = "${curr_snapshot}" ] ; then
@@ -1177,11 +1177,11 @@ show_history () {
 	    fi
         done
         printf "|"
-	last_recv_host_pool="`last ${recv_host_pools}`"
+	last_recv_host_pool="$(last ${recv_host_pools})"
         for recv_host_pool in ${recv_host_pools} ; do
             recv_host=${recv_host_pool%:*}
             recv_pool=${recv_host_pool##*:}
-            if [ "`cat data/${recv_host}_${recv_pool}.dat|grep "${curr_snapshot}"`" != "" ] ; then
+            if [ "$(cat data/${recv_host}_${recv_pool}.dat|grep "${curr_snapshot}")" != "" ] ; then
                 volume_stat="X"
                 for dropsnap in ${recv_dropsnaps} ${dropsnaps} ; do
                     if [ "${dropsnap}" = "${curr_snapshot}" ] ; then
@@ -1229,7 +1229,7 @@ hotrun () {
 }
 
 do_send_snapshot () {
-    for snapshot in `sendsnap` ; do
+    for snapshot in $(sendsnap) ; do
         zpoolfs=${send_zpoolfs}
         snap_ssh="${send_ssh}"
         $*
@@ -1237,7 +1237,7 @@ do_send_snapshot () {
 }
 
 do_recv_snapshot () {
-    for snapshot in `recvsnap` ; do
+    for snapshot in $(recvsnap) ; do
         zpoolfs=${recv_zpoolfs}${send_zfs}
         snap_ssh="${recv_ssh}"
         $*
@@ -1271,7 +1271,7 @@ migrate_snapshots () {
     cuprefix=${snprefix}
     snprefix=""
     max_frequency=daily
-    currsnap="`date +%y%m%d`"
+    currsnap="$(date +%y%m%d)"
     forall_snapshots \
         migrate_snapshot
 }
@@ -1318,7 +1318,7 @@ declare -A per_y
 # 1 backup per year forever
 
 smartretp_snap () {
-    curr_timestamp=`date '+%s'`
+    curr_timestamp=$(date '+%s')
     for snapshot in $* ; do
         # yymmddHHMM
         yy=${snapshot%[0-9][0-9][0-9][0-9][0-9][0-9]}
@@ -1328,8 +1328,8 @@ smartretp_snap () {
         dd=${ddHH%[0-9][0-9]}
         HH=${ddHH##[0-9][0-9]}
         timestamp="$yy-$mm-$dd $HH:00:00"
-        WW=`date -d"${timestamp}" '+%W'`
-        age=$((${curr_timestamp}-`date -d"${timestamp}" '+%s'`))
+        WW=$(date -d"${timestamp}" '+%W')
+        age=$((${curr_timestamp}-$(date -d"${timestamp}" '+%s')))
         if [ $((${age} < 60*60*24)) = 1 ] ; then
             if [ "${per_h[${HH}]}" != "" ] ; then
                 echo ${snapshot}
@@ -1379,7 +1379,7 @@ EOF
 }
 
 all () {
-    echo "# Backup began at `date`"
+    echo "# Backup began at $(date)"
     echo "# Connecting"
     connect
     echo "# update snapshot lists"
@@ -1390,7 +1390,7 @@ all () {
     smartretp
     echo "# Calculating totals"
     calc_totals
-    echo "# Creating backups: ${send_files} objects / `byteconv ${send_total}`"
+    echo "# Creating backups: ${send_files} objects / $(byteconv ${send_total})"
     backups
     # offmounts
     echo "# Saving restore scripts"
@@ -1412,7 +1412,7 @@ all () {
     disconnect
     # dryrun=1 disconnect
     # echo "Note: You must run ./backup.sh disconnect before to remove the media."
-    echo "# Backup ended at `date`"
+    echo "# Backup ended at $(date)"
 }
 
 help_help () {
