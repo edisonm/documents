@@ -142,7 +142,14 @@ zfs_create_clone () {
 }
 
 progress_cmd () {
-    description="${1} ${send_zfs##/} $((${send_fileno}+1)) $(byteconv ${snapshot_size})"
+    lowerbound=$(byteconv ${send_offset})
+    upperbound=$(byteconv $((${send_offset}+${snapshot_size})))
+    if [ "${lowerbound}" != "${upperbound}" ] ; then
+        interval=" (<${upperbound})"
+    else
+        interval=""
+    fi
+    description="${1} ${send_zfs##/} $((${send_fileno}+1)) $(byteconv ${snapshot_size})${interval}"
     # ifdry echo "# description=${description}"
     # progress_cmd="dryerpn pvv ${send_offset}"
     # WARNING: assume that the backup scripts are present in recv_pool:
