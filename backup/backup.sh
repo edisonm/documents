@@ -375,11 +375,11 @@ dropsnaps () {
 destroy_send_recv_dropsnap () {
     send_unfold=1 \
         zfs_prev_${fstype} \
-        destroy_send_dropsnap ${dropsnaps}
+        destroy_send_dropsnap $*
     
     send_unfold=1 \
         forall_recv \
-        destroy_recv_dropsnap ${dropsnaps}
+        destroy_recv_dropsnap $*
 }
 
 destroy_recv_dropsnap () {
