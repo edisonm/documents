@@ -11,7 +11,7 @@ ziper () {
 	    echo "lrz -c"
 	    ;;
 	rat)
-	    echo "zstd -T0 -5 -zcf"
+	    echo "zstd -T0 -9 -zcf"
 	    ;;
 	*)  # raw or default
 	    echo "cat"
@@ -319,7 +319,7 @@ backup_zpool_zdump_file () {
         snapshot_size="$(snapshot_size_intern_zpool $*)"
         nodry fix_recv_size
         if [ $((${snapshot_size} <= ${recv_size[${recv_hostpool}]})) != 0 ] ; then
-            ( dryern ${send_ssh} zfs send -c $(send_opts $*) \
+            ( dryern ${send_ssh} zfs send $(send_opts $*) \
                   | dryerp ${recv_ssh} "$(progress_cmd d) | $(ziper $(zdumpext ${recv_pool})) > ${recv_file}-partial" ) || exit 1
             backup_zpool_zdump_file_cleanup_$# $*
             dryer ${recv_ssh} mv ${recv_file}-partial ${recv_file}
@@ -388,7 +388,7 @@ backup_zpool_zdump_file_cleanup_2 () {
 }
 
 snapshot_size_zpool () {
-    size="$($send_ssh zfs send -nvPc ${sendopts} ${send_zpoolfs}@${snprefix}${currsnap} 2>/dev/null | grep size | awk '{print $2}')"
+    size="$($send_ssh zfs send -nvP ${sendopts} ${send_zpoolfs}@${snprefix}${currsnap} 2>/dev/null | grep size | awk '{print $2}')"
     if [ "${size}" = "" ] ; then
 	echo 0
     else
@@ -397,7 +397,7 @@ snapshot_size_zpool () {
 }
 
 snapshot_size_intern_zpool () {
-    size="$(${send_ssh} zfs send -nvPc $(send_opts $*) 2>/dev/null | grep size | awk '{print $2}')"
+    size="$(${send_ssh} zfs send -nvP $(send_opts $*) 2>/dev/null | grep size | awk '{print $2}')"
     if [ "${size}" = "" ] ; then
 	echo 0
     else
