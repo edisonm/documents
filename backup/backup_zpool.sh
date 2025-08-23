@@ -2,6 +2,8 @@
 
 info_dir=crbackup
 
+compressop="-o compression=zstd-9"
+
 declare -A host_snapshot
 declare -A host_snapshots
 
@@ -240,8 +242,8 @@ backup_zpool_clone () {
     snapshot_size=$(snapshot_size)
     nodry fix_recv_size
     if [ $((${snapshot_size} <= ${recv_size[${recv_hostpool}]})) != 0 ] ; then
-        ( dryern ${send_ssh} zfs send -c ${sendopts} ${send_zpoolfs}@${snprefix}${currsnap} \
-              | dryerp ${recv_ssh} "$(progress_cmd c) | zfs recv -d -F ${recv_zpoolfs}" ) || true
+        ( dryern ${send_ssh} zfs send ${sendopts} ${send_zpoolfs}@${snprefix}${currsnap} \
+              | dryerp ${recv_ssh} "$(progress_cmd c) | zfs recv -d -F ${compressop} ${recv_zpoolfs}" ) || true
         update_host_snapshots "${recv_host}" "${recv_ssh}" "${recv_zpoolfs}${send_zfs}" "${snprefix}${currsnap}"
     else
         echo "# Skip ${recv_zpoolfs}${send_zfs} clone: No space left on ${recv_hostpool} ($(byteconv ${snapshot_size}) > $(byteconv ${recv_size[${recv_hostpool}]}))"
