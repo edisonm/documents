@@ -1066,7 +1066,8 @@ volume_host_pool () {
 }
 
 send_snapshots () {
-    forall_backjobs \
+    send_unfold=1 \
+        forall_backjobs \
         zfs_prev sendsnap sendsnap
 }
 
@@ -1076,7 +1077,7 @@ send_snapshots () {
 received_snapshots () {
     while IFS=':' read -r recv_host recv_pool ; do
         if [ -f data/${recv_host}_${recv_pool}.dat ] ; then
-            cat data/${recv_host}_${recv_pool}.dat | match_backup_snapshot
+            cat data/${recv_host}_${recv_pool}.dat
         fi
     done < <(recv_host_pools|sort -u)
 }
@@ -1475,6 +1476,10 @@ main () {
 		;;
             snapshots)
                 snapshots
+                ;;
+            showsnaps)
+                update_hosts_snapshots
+                (send_snapshots;received_snapshots)|sort -u
                 ;;
             dropsnaps)
                 dropsnaps $*
