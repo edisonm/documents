@@ -1107,6 +1107,25 @@ last () {
     echo $1
 }
 
+chr() {
+  [ "$1" -lt 256 ] || return 1
+  printf "\\$(printf '%03o' "$1")"
+}
+
+ord() {
+  LC_CTYPE=C printf '%d' "'$1"
+}
+
+declare -A send_id
+
+for ((idN=0;idN<10;idN++)) ; do
+    send_id[${idN}]=$(chr $(($(ord 0)+${idN})))
+done
+
+for ((idA=0;idA<26;idA++)) ; do
+    send_id[$((${idN}+${idA}))]=$(chr $(($(ord A)+${idA})))
+done
+
 show_history () {
     zsid=0
     forall_backjobs \
@@ -1138,7 +1157,7 @@ show_history () {
     printf "%-*s|" $(lmax Snapshot ${currsnap}) "[${snprefix}]"
 
     for ((zsid=0;zsid<$((${zsin}-1));zsid++)) ; do
-        printf "%-2s" "${zsid}"
+        printf "%-2s" "${send_id[${zsid}]}"
     done
     printf "%-1s|" $((${zsin}-1))
     
