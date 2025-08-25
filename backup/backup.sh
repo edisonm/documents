@@ -1137,7 +1137,7 @@ show_history () {
     zsid=0
     send_hostpoolfss=$(for w in ${!send_snapshots[*]} ; do echo $w; done|sort -u)
     for send_hostpoolfs in ${send_hostpoolfss} ; do
-        printf "%2s|%s\n" "${zsid}" "${send_hostpoolfs}"
+        printf "%2s|%s\n" "${send_id[${zsid}]}" "${send_hostpoolfs}"
 	zsid=$((${zsid}+1))
     done
     zsin=${zsid}
@@ -1160,7 +1160,7 @@ show_history () {
     for ((zsid=0;zsid<$((${zsin}-1));zsid++)) ; do
         printf "%-2s" "${send_id[${zsid}]}"
     done
-    printf "%-1s|" $((${zsin}-1))
+    printf "%-1s|" ${send_id[$((${zsin}-1))]}
     
     for ((zrid=0;zrid<$((${zrin}-1));zrid++)) ; do
         printf "%-2s" "${zrid}"
