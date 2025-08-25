@@ -363,7 +363,7 @@ destroy_recv_dropsnap_top () {
 }
 
 dropsnaps () {
-    dropsnaps=${dropsnaps:-${1}}
+    local dropsnaps=${dropsnaps:-${1}}
     # Note: duplicated calls are handled by destroy_snapshot, so don't try to
     # optimize this here
     dropopts="-r"
@@ -1173,6 +1173,23 @@ show_history () {
     done
     
     printf "\n"
+
+    # Recalculating dropsnaps to refresh them
+
+    declare -A send_dropsnaps
+    declare -A recv_dropsnaps
+
+    if [ "${smartretp}" = 1 ] ; then
+	for send_hostpoolfs in ${send_hostpoolfss} ; do
+	    send_dropsnaps[${send_hostpoolfs}]="$(smartretp_snap ${send_snapshots[${send_hostpoolfs}]})"
+	done
+	for recv_host_pool in ${recv_host_pools} ; do
+	    recv_host=${recv_host_pool%:*}
+            recv_pool=${recv_host_pool##*:}
+	    recv_dropsnaps[${recv_host_pool}]="$(smartretp_snap $(cat data/${recv_host}_${recv_pool}.dat))"
+	done
+    fi
+    
     for curr_snapshot in $((send_snapshots;received_snapshots)|sort -u) ; do
         printf "%-*s|" $(lmax snapshot ${currsnap}) ${curr_snapshot##${snprefix}}
 	last_send_hostpoolfs="$(last ${send_hostpoolfss})"
@@ -1182,9 +1199,14 @@ show_history () {
                    done \
                  | grep ${curr_snapshot})" != "" ] ; then
                 volume_stat="X"
-                for dropsnap in ${send_dropsnaps} ${dropsnaps} ; do
+                for dropsnap in ${send_dropsnaps[${send_hostpoolfs}]} ; do
                     if [ "${dropsnap}" = "${curr_snapshot}" ] ; then
                         volume_stat="D"
+                    fi
+                done
+                for dropsnap in ${dropsnaps} ; do
+                    if [ "${dropsnap}" = "${curr_snapshot}" ] ; then
+                        volume_stat="U"
                     fi
                 done
             else
@@ -1203,9 +1225,14 @@ show_history () {
             recv_pool=${recv_host_pool##*:}
             if [ "$(cat data/${recv_host}_${recv_pool}.dat|grep "${curr_snapshot}")" != "" ] ; then
                 volume_stat="X"
-                for dropsnap in ${recv_dropsnaps} ${dropsnaps} ; do
+                for dropsnap in ${recv_dropsnaps[${recv_host_pool}]} ; do
                     if [ "${dropsnap}" = "${curr_snapshot}" ] ; then
                         volume_stat="D"
+                    fi
+                done
+                for dropsnap in ${dropsnaps} ; do
+                    if [ "${dropsnap}" = "${curr_snapshot}" ] ; then
+                        volume_stat="U"
                     fi
                 done
             else
@@ -1220,7 +1247,7 @@ show_history () {
         printf "\n"
     done
     printf "\n"
-    echo "Note: X=present, D=to be deleted, -=not present"
+    echo "Note: X=present, D=to be deleted by smartretp, U=to be deleted by dropsnaps, -=not present"
     printf "\n"
 }
 

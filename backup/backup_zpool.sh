@@ -70,7 +70,11 @@ zfs_destroy () {
     snapshot="${2}@${3}"
     if host_snapshot "${ssh_snap}" "${snapshot}" ; then
         dryer ${ssh_snap} zfs destroy "${snapshot}" 2>/dev/null < /dev/null || true
-        del_host_snapshot ${1} ${snapshot}
+	# Next line is commented out to avoid removal of the the
+        # snapshots from the host_snapshot array, otherwise you will
+        # not see that they are going to be deleted in the
+        # show_history output:
+	# del_host_snapshot ${1} ${snapshot}
     fi
 }
 
