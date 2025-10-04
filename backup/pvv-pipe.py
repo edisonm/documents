@@ -36,7 +36,9 @@ def main():
         ncols=columns,
         bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]',
         desc=args.desc,
-        leave=False        # <- Do not leave final bar when done
+        leave=False,        # <- Do not leave final bar when done
+        mininterval=0.5,    # refresh screen at most once per second
+        maxinterval=5.0     # (optional) force refresh at least every 5s
     )
     
     # Avoid printing a newline or clearing

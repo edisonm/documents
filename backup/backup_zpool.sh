@@ -47,9 +47,11 @@ update_hosts_snapshots () {
 update_host_snapshots () {
     # next line is NOT REDUNDANT if drying is true:
     add_host_snapshot "${1}" "${3}@${4}"
-    while read -r snapshot ; do
-        add_host_snapshot ${1} ${snapshot}
-    done < <(( ${2} zfs list -prHt snapshot -o name ${3} | grep "@${4}" 2>/dev/null < /dev/null ))
+    if [ "${dryrun}" != 1 ] ; then
+	while read -r snapshot ; do
+            add_host_snapshot ${1} ${snapshot}
+	done < <(( ${2} zfs list -prHt snapshot -o name ${3} | grep "@${4}" 2>/dev/null < /dev/null ))
+    fi
 }
 
 host_snapshot () {
@@ -123,7 +125,7 @@ zfs_create_rec_clone () {
     has_recv_zpoolfs="$(${recv_ssh} zfs list -Ho name ${1} 2>/dev/null)" || true
     if [ "${has_recv_zpoolfs}" = "" ] ; then
         zfs_create_rec_clone "$(dirname ${1})"
-        dryer ${recv_ssh} zfs create -o mountpoint=none ${1}
+        dryer ${recv_ssh} zfs create -o mountpoint=none -o canmount=off ${1}
         # TBD: add '-o keyformat=passphrase -o keylocation=file:///crypto_keyfile.bin' if encrypted
     fi
 }
@@ -131,14 +133,14 @@ zfs_create_rec_clone () {
 zfs_create_comm () {
     has_recv_zpoolfs="$(${recv_ssh} zfs list -Ho name ${recv_zpool}/crbackup 2>/dev/null)" || true
     if [ "${has_recv_zpoolfs}" = "" ] ; then
-        dryer ${recv_ssh} zfs create -o mountpoint=/crbackup -o canmount=on ${recv_zpool}/crbackup
+        dryer ${recv_ssh} zfs create -o mountpoint=/${info_dir} -o canmount=on ${recv_zpool}/crbackup
     fi
 }
 
 zfs_create_zdump () {
     zfs_create_comm
-    if ! ${recv_ssh} test -d /mnt/${recv_zpool}/crbackup${recv_zfs}${send_zfs} ; then
-        dryer ${recv_ssh} mkdir -p /mnt/${recv_zpool}/crbackup${recv_zfs}${send_zfs}
+    if ! ${recv_ssh} test -d /mnt/${recv_zpool}/${info_dir}${recv_zfs}${send_zfs} ; then
+        dryer ${recv_ssh} mkdir -p /mnt/${recv_zpool}/${info_dir}${recv_zfs}${send_zfs}
     fi
 }
 
@@ -187,7 +189,7 @@ update_zpool_zdump () {
 }
 
 update_zpool_zdump_1 () {
-    recv_dir="/mnt/${recv_zpool}/crbackup${recv_zfs}${send_zfs}"
+    recv_dir="/mnt/${recv_zpool}/${info_dir}${recv_zfs}${send_zfs}"
     recv_files="$(${recv_ssh} "cd ${recv_dir} ; ls *_*.ra[wzt]" 2>/dev/null || true)"
     update_zpool_zdump_full $(sendsnap)
 }
@@ -267,7 +269,7 @@ backup_zpool_zdump () {
 }
 
 backup_zpool_zdump_1 () {
-    recv_dir="/mnt/${recv_zpool}/crbackup${recv_zfs}${send_zfs}"
+    recv_dir="/mnt/${recv_zpool}/${info_dir}${recv_zfs}${send_zfs}"
     recv_files="$(${recv_ssh} "cd ${recv_dir} ; ls *_*.ra[wzt]" 2>/dev/null || true)"
     if ! ${recv_ssh} test -d ${recv_dir} ; then
         dryer ${recv_ssh} mkdir -p ${recv_dir}
@@ -413,7 +415,7 @@ snapshot_size_intern_zpool () {
 
 backup_restore_sh_zpool () {
     nodry echo "restore_job ${send_zpool} ${recv_zfs} ${send_zfs}" \
-        | nodry ${recv_ssh} "cat >> /mnt/${recv_zpool}/crbackup/restore.sh"
+        | nodry ${recv_ssh} "cat >> /mnt/${recv_zpool}/${info_dir}/restore.sh"
 }
 
 zfssetopts="-u"

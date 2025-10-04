@@ -1,7 +1,7 @@
 #!/bin/bash
 
-DISKS="/dev/sda /dev/sdb /dev/sdc"
-ZPOOL="set3"
+DISKS="/dev/sdc"
+ZPOOL="set5"
 # PARTS="1 2"
 # PARTSIZE=+4883735552
 # ZOPTS=raidz1
@@ -52,4 +52,4 @@ for DISK in ${DISKS} ; do
     done
 done
 
-dryer zpool create -o ashift=12 -o autotrim=on -O acltype=posixacl -O xattr=sa -O dnodesize=auto -O compression=on -O normalization=formD -O relatime=on -O canmount=off -O mountpoint=none -R /mnt/${ZPOOL} ${ZPOOL} ${ZOPTS} ${VOLS}
+dryer zpool create -o ashift=12 -o autotrim=on -O acltype=posixacl -O xattr=sa -O dnodesize=auto -O compression=zstd-9 -O normalization=formD -O relatime=on -O canmount=off -O mountpoint=none -R /mnt/${ZPOOL} ${ZPOOL} ${ZOPTS} ${VOLS}

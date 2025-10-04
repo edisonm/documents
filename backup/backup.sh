@@ -1439,11 +1439,12 @@ all () {
     calc_totals
     echo "# Creating backups: ${send_files} objects / $(byteconv ${send_total})"
     backups
-    # offmounts
+    offmounts
     echo "# Saving restore scripts"
-    restores
+    # the first time, this could fail, so we should ignore
+    restores || true 
     echo "# generate bak_info dirs in the backup media"
-    bak_infos
+    bak_infos || true
     echo "# generate fixmount_*.sh to restore the attributes of the filesystem"
     fixmounts
     echo "# Logging backup"
