@@ -23,7 +23,8 @@ ziper () {
 
 add_host_snapshot () {
     host_snapshot[${1},${2}]=1
-    host_snapshots[${1},${2%@*}]="$(( for i in ${host_snapshots[${1},${2%@*}]} ; do echo $i ; done ; echo ${2##*@} ) | sort -u)"
+    host_snapshots[${1},${2%@*}]="${host_snapshots[${1},${2%@*}]} ${2##*@}"
+    # host_snapshots[${1},${2%@*}]="$(( for i in ${host_snapshots[${1},${2%@*}]} ; do echo $i ; done ; echo ${2##*@} ) | sort -u)"
 }
 
 del_host_snapshot () {
@@ -42,6 +43,9 @@ update_hosts_snapshots () {
                forall_backjobs \
                    echo_sendhost ; \
              ) | sort -u)
+    for index in ${!host_snapshots[@]} ; do
+        host_snapshots[${index}]="$(( for i in ${host_snapshots[${index}]} ; do echo $i ; done ; echo ${2##*@} ) | sort -u)"
+    done
 }
 
 update_host_snapshots () {

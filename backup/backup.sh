@@ -1523,6 +1523,9 @@ main () {
                 # show_history
                 statistics
                 ;;
+            testing)
+                update_hosts_snapshots
+                ;;
             *)
                 help
                 ;;
