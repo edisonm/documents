@@ -418,7 +418,11 @@ destroy_recv_smartretp_clone () {
 }
 
 destroy_recv_smartretp_top () {
-    # Next command means: keep initsnap, prevsnap, currsnap, and last 2.
+    # Next command means: keep initsnap, prevsnap, currsnap, first 2 (via tail)
+    # and last 2 (via head).
+    #
+    # First 2 must be kept to avoid to resend a full backup (if zdumpext is
+    # ra{zwt}).  Last 2 must be kept to avoid problems with last snapshots.
     # initsnap must be kept to avoid a full backup in case it is removed.
     recvsnap="$(recvsnap|tail -n +2|head -n -2)"
     recv_dropsnaps=$(smartretp_snap ${recvsnap})
