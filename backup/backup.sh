@@ -1453,6 +1453,8 @@ all () {
     fixmounts
     echo "# Logging backup"
     backup_log
+    echo "# update snapshot lists again to get reports right"
+    update_hosts_snapshots
     echo "# Show backup history"
     show_history
     echo "# Show statistics"
