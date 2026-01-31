@@ -189,7 +189,7 @@ config_instpacks () {
     apt-get install --yes $DEBPACKS
     # os-prober is needed only on dual-boot systems.
     # Placed at the end to make sure is uninstalled:
-    if [ "${DISKLAYOUT}" != "dualboot" ] && [ "${DISKLAYOUT}" != "dualboot4" ] ; then
+    if [ "${DISKLAYOUT}" != "dualboot" ] ; then
         apt-get remove --yes --purge os-prober
     fi
     chmod a+x /etc/init.d/networking # looks like a bug in the package that install this file

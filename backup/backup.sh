@@ -363,13 +363,13 @@ destroy_recv_dropsnap_top () {
 }
 
 dropsnaps () {
-    local dropsnaps=${dropsnaps:-${1}}
+    local ldropsnaps=${1-${dropsnaps}}
     # Note: duplicated calls are handled by destroy_snapshot, so don't try to
     # optimize this here
     dropopts="-r"
 
     forall_backjobs \
-        destroy_send_recv_dropsnap ${dropsnaps}
+        destroy_send_recv_dropsnap ${ldropsnaps}
 }
 
 destroy_send_recv_dropsnap () {

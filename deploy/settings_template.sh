@@ -10,7 +10,8 @@ DISTRO=debian
 
 # Debian versions
 # VERSNAME=bullseye
-VERSNAME=bookworm
+# VERSNAME=bookworm
+VERSNAME=trixie
 
 # Ubuntu versions
 # VERSNAME=focal
@@ -64,6 +65,7 @@ AUTH_KEY=id_rsa.pub
 
 DEBPACKS="ntp acl binutils build-essential openssh-server emacs"
 # DEBPACKS+=" firefox-esr gparted mtools"
+# DEBPACKS+=" kde-plasma-desktop task-kde-desktop"
 # Equivalent to live xfce4 installation + some tools
 # DEBPACKS+=" xfce4 task-xfce-desktop"
 # DEBPACKS+=" lxde task-lxde-desktop"
@@ -81,11 +83,11 @@ DISKLAYOUT=singboot
 # DISKLAYOUT=raidz2
 # DISKLAYOUT=raidz3
 
-# Start at 3, similar to singboot without redefined bios and uefi partitons
+# Similar to singboot without redefined bios and uefi partitons
 # DISKLAYOUT=dualboot
 
-# Start at 4
-# DISKLAYOUT=dualboot4
+# Start defining new partitions at
+DUALBOOTAT=3
 
 # Specifies if you want to wipe out existing partions, if no then trying to
 # overwrite partitions will cause a failure.

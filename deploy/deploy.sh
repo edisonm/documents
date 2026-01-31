@@ -288,18 +288,7 @@ set_swap_suff () {
 setenv_dualboot () {
     COUNT=1
     set_uefi_suff
-    inc_count
-    inc_count
-    set_boot_suff
-    set_root_suff
-    set_swap_suff
-    setenv_commdual
-}
-
-setenv_dualboot4 () {
-    COUNT=1
-    set_uefi_suff
-    inc_count
+    COUNT=${DUALBOOTAT}
     set_boot_suff
     set_root_suff
     set_swap_suff
@@ -471,12 +460,15 @@ create_partitions_singboot () {
 }
 
 create_partitions_dualboot () {
-    for DISK in ${DISKS} ; do
-        make_partitions ${DISK}
-    done
-}
+    if [ "${WIPEOUT}" == yes ] ; then
+        # First, wipeout the disks:
+        for DISK in ${DISKS} ; do
+            for PART in ${BOOTSUFF} ${ROOTSUFF} ${SWAPSUFF} ; do
+                skip_if_resuming sgdisk --delete=${PART} $DISK
+            done
+        done
+    fi
 
-create_partitions_dualboot4 () {
     for DISK in ${DISKS} ; do
         make_partitions ${DISK}
     done
