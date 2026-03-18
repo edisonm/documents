@@ -441,6 +441,9 @@ offmount_zpool_clone () {
 	send_mountpoint_source="$(${send_ssh} zfs get -H -o source mountpoint ${send_zpoolfs} | awk '{print $1}' 2>/dev/null)"
 	if [ "${send_mountpoint_source}" = local ] || [ "${send_mountpoint_source}" = received ] ; then
 	    send_mountpoint_value="$(${send_ssh} zfs get -H -o value mountpoint ${send_zpoolfs} 2>/dev/null)"
+            if [ "${send_mountpoint_value}" = "/" ] ; then
+                send_mountpoint_value=""
+            fi
 	    if [ "${send_mountpoint_value}" != none ] ; then
 		mountpoint="/${send_host}${send_mountpoint_value}"
 		recv_mountpoint_value="$(${recv_ssh} zfs get -H -o value mountpoint ${recv_zpoolfs}${send_zfs} 2>/dev/null || true)"
