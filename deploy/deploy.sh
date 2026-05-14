@@ -1152,7 +1152,7 @@ if [ -f /usr/sbin/tcsd ] ; then
     /usr/sbin/tcsd
 fi
 
-( /usr/bin/tpm_sealdata -i /crypto_keyfile.bin -o ${DESTDIR}/autounlock.key -z ) ||  || rm -f ${DESTDIR}/autounlock.key
+( /usr/bin/tpm_sealdata -i /crypto_keyfile.bin -o ${DESTDIR}/autounlock.key -z ) || rm -f ${DESTDIR}/autounlock.key
 
 EOF
     chmod a+x /etc/initramfs-tools/hooks/tpm_tools
