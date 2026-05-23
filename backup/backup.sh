@@ -369,17 +369,13 @@ dropsnaps () {
     dropopts="-r"
 
     forall_backjobs \
-        destroy_send_recv_dropsnap ${ldropsnaps}
+        destroy_send_dropsnaps ${ldropsnaps}
 }
 
-destroy_send_recv_dropsnap () {
+destroy_send_dropsnaps () {
     send_unfold=1 \
         zfs_prev_${fstype} \
         destroy_send_dropsnap $*
-    
-    send_unfold=1 \
-        forall_recv \
-        destroy_recv_dropsnap $*
 }
 
 destroy_recv_dropsnap () {
@@ -389,44 +385,45 @@ destroy_recv_dropsnap () {
 smartretp () {
     if [ "${smartretp}" = 1 ] ; then
         forall_backjobs \
-            destroy_send_recv_smartretp
+            destroy_send_smartretps
     fi
 }
 
-destroy_send_recv_smartretp () {
+# Clean up receiver side snapshots that were deleted on the source.
+cleanrecv () {
+    # Run receiver‑side drop deletion for each backjob
+    send_unfold=1 \
+        forall_backjobs \
+        forall_recv \
+        zfs_prev recvsnap \
+        cleanup_recv_dropsnap
+}
+
+notinsend () {
+    # for some reason comm doesn't work, so I use the fail-safe bash method:
+    # comm -23 <(sendsnap) <(recvsnap)
+    for i in $(recvsnap) ; do
+        k=""
+        for j in $(sendsnap) ; do
+            if [ $i = $j ] ; then
+                k=$i
+            fi
+        done
+        if [ "$k" = "" ] ; then
+            echo $i
+        fi
+    done
+}
+
+cleanup_recv_dropsnap () {
+    destroy_recv_dropsnap $(notinsend)
+}
+
+destroy_send_smartretps () {
     send_unfold=1 \
         zfs_prev \
         sendsnap \
         destroy_send_smartretp
-
-    send_unfold=1 \
-        forall_recv \
-        destroy_recv_smartretp
-}
-
-destroy_recv_smartretp () {
-    destroy_recv_smartretp_${recv_fmt}
-}
-
-destroy_recv_smartretp_zdump () {
-    destroy_recv_smartretp_top
-}
-
-destroy_recv_smartretp_clone () {
-    # zfs destroy supports recursion, so we don't do the recursion ourselves
-    destroy_recv_smartretp_top
-}
-
-destroy_recv_smartretp_top () {
-    # Next command means: keep initsnap, prevsnap, currsnap, first 2 (via tail)
-    # and last 2 (via head).
-    #
-    # First 2 must be kept to avoid to resend a full backup (if zdumpext is
-    # ra{zwt}).  Last 2 must be kept to avoid problems with last snapshots.
-    # initsnap must be kept to avoid a full backup in case it is removed.
-    recvsnap="$(recvsnap|tail -n +2|head -n -2)"
-    recv_dropsnaps=$(smartretp_snap ${recvsnap})
-    destroy_recv_dropsnap ${recv_dropsnaps} ${dropsnaps}
 }
 
 destroy_send_smartretp () {
@@ -462,7 +459,19 @@ addprefix () {
 }
 
 listsnap () {
-    comm -12 <(sendsnap) <(recvsnap)
+    # for some reason comm doesn't work, so I use the fail-safe bash method:
+    # comm -12 <(sendsnap) <(recvsnap)
+    for i in $(recvsnap) ; do
+        k=""
+        for j in $(sendsnap) ; do
+            if [ $i = $j ] ; then
+                k=$i
+            fi
+        done
+        if [ "$k" != "" ] ; then
+            echo $i
+        fi
+    done
 }
 
 prevsnap () {
@@ -1195,7 +1204,7 @@ show_history () {
     fi
     
     for curr_snapshot in $((send_snapshots;received_snapshots)|sort -u) ; do
-        printf "%-*s|" $(lmax snapshot ${currsnap}) ${curr_snapshot##${snprefix}}
+        printf "%-*s|" $(lmax snapshot ${currsnap}) ${curr_snapshot}
 	last_send_hostpoolfs="$(last ${send_hostpoolfss})"
         for send_hostpoolfs in ${send_hostpoolfss} ; do
             if [ "$(for snapshot in ${send_snapshots[${send_hostpoolfs}]} ; do \
@@ -1439,6 +1448,8 @@ all () {
     hotrun snapshots
     echo "# Applying retention policy"
     smartretp
+    echo "# Cleaning up received snapshots"
+    cleanrecv
     echo "# Calculating totals"
     calc_totals
     echo "# Creating backups: ${send_files} objects / $(byteconv ${send_total})"
@@ -1454,7 +1465,7 @@ all () {
     echo "# Logging backup"
     backup_log
     echo "# update snapshot lists again to get reports right"
-    update_hosts_snapshots
+    nodry update_hosts_snapshots
     echo "# Show backup history"
     show_history
     echo "# Show statistics"
@@ -1505,9 +1516,9 @@ main () {
             connect)
                 connect
                 ;;
-	    disconnect)
-		disconnect
-		;;
+            disconnect)
+                disconnect
+                ;;
             snapshots)
                 snapshots
                 ;;
@@ -1529,8 +1540,9 @@ main () {
                 # show_history
                 statistics
                 ;;
-            testing)
+            cleanrecv)
                 update_hosts_snapshots
+                cleanrecv
                 ;;
             *)
                 help
