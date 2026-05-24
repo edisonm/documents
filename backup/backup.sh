@@ -106,15 +106,15 @@ if [ "$max_frequency" = minute ] ; then
 fi
 
 match_backup_snapshot_daily () {
-    awk 'match($0,/^'"${snprefix}"'[0-9][0-9](0[1-9]|1[0-2])(0[1-9]|[1-2][0-9]|3[0-1])$/){print $0}'
+    awk 'match($0,/^[0-9][0-9](0[1-9]|1[0-2])(0[1-9]|[1-2][0-9]|3[0-1])$/){print $0}'
 }
 
 match_backup_snapshot_hourly () {
-    awk 'match($0,/^'"${snprefix}"'[0-9][0-9](0[1-9]|1[0-2])(0[1-9]|[1-2][0-9]|3[0-1])([0-1][0-9]|2[0-3])$/){print $0}'
+    awk 'match($0,/^[0-9][0-9](0[1-9]|1[0-2])(0[1-9]|[1-2][0-9]|3[0-1])([0-1][0-9]|2[0-3])$/){print $0}'
 }
 
 match_backup_snapshot_minute () {
-    awk 'match($0,/^'"${snprefix}"'[0-9][0-9](0[1-9]|1[0-2])(0[1-9]|[1-2][0-9]|3[0-1])([0-1][0-9]|2[0-3])[0-5][0-9]$/){print $0}'
+    awk 'match($0,/^[0-9][0-9](0[1-9]|1[0-2])(0[1-9]|[1-2][0-9]|3[0-1])([0-1][0-9]|2[0-3])[0-5][0-9]$/){print $0}'
 }
 
 match_backup_snapshot () {
@@ -209,7 +209,6 @@ media_host_pool () {
 }
 
 media_host_pools () {
-    fstype=${1}
     forall_mediahosts \
         forall_medias \
         media_host_pool
@@ -229,7 +228,7 @@ recv_fmt () {
 
 forall_recv () {
     if [ "${recv_pool}" = "" ] || [ "${recv_host}" = "" ] ; then
-        media_host_pools[${fstype}]="${media_host_pools[${fstype}]:-$(media_host_pools ${fstype})}"
+        media_host_pools[${fstype}]="${media_host_pools[${fstype}]:-$(media_host_pools)}"
         for recv_host_pool in ${media_host_pools[${fstype}]} ; do
             recv_host=${recv_host_pool%:*}
 	    recv_pool=${recv_host_pool##*:}
@@ -389,9 +388,8 @@ smartretp () {
     fi
 }
 
-# Clean up receiver side snapshots that were deleted on the source.
 cleanrecv () {
-    # Run receiver‑side drop deletion for each backjob
+    # Clean up receiver side snapshots that were deleted on the source.
     send_unfold=1 \
         forall_backjobs \
         forall_recv \
@@ -433,7 +431,7 @@ destroy_send_smartretp () {
 }
 
 sendsnap () {
-    sendsnap0|match_backup_snapshot|sed -e s/${snprefix}//g|sort -u
+    sendsnap0|match_backup_snapshot|sort -u
 }
 
 sendsnap0 () {
@@ -441,7 +439,7 @@ sendsnap0 () {
 }
 
 recvsnap () {
-    recvsnap0|match_backup_snapshot|sed -e s/${snprefix}//g|sort -u
+    recvsnap0|match_backup_snapshot|sort -u
 }
 
 recvsnap0 () {
@@ -1140,15 +1138,25 @@ for ((idA=0;idA<26;idA++)) ; do
     send_id[$((${idN}+${idA}))]=$(chr $(($(ord A)+${idA})))
 done
 
+set_media_host_pool () {
+    media_host_pool[${mediahost}:${media_pool}]=1
+}
+
 show_history () {
     zsid=0
     forall_backjobs \
         zfs_prev sendsnap \
         update_send_pool
+
+    declare -A media_host_pool
+    
+    fstype=zpool forall_mediahosts \
+        forall_medias \
+        set_media_host_pool
     
     printf "No|Sources\n--+-------\n"
     zsid=0
-    send_hostpoolfss=$(for w in ${!send_snapshots[*]} ; do echo $w; done|sort -u)
+    send_hostpoolfss=$(for w in ${!send_snapshots[@]} ; do echo $w; done|sort -u)
     for send_hostpoolfs in ${send_hostpoolfss} ; do
         printf "%2s|%s\n" "${send_id[${zsid}]}" "${send_hostpoolfs}"
 	zsid=$((${zsid}+1))
@@ -1190,28 +1198,58 @@ show_history () {
     # Recalculating dropsnaps to refresh them
 
     declare -A send_dropsnaps
-    declare -A recv_dropsnaps
 
     if [ "${smartretp}" = 1 ] ; then
 	for send_hostpoolfs in ${send_hostpoolfss} ; do
 	    send_dropsnaps[${send_hostpoolfs}]="$(smartretp_snap ${send_snapshots[${send_hostpoolfs}]})"
 	done
-	for recv_host_pool in ${recv_host_pools} ; do
-	    recv_host=${recv_host_pool%:*}
-            recv_pool=${recv_host_pool##*:}
-	    recv_dropsnaps[${recv_host_pool}]="$(smartretp_snap $(cat data/${recv_host}_${recv_pool}.dat))"
-	done
     fi
+    
+    declare -A send_datasets
+    
+    for send_hostpoolfs in ${send_hostpoolfss} ; do
+        for index in ${!host_snapshots[@]} ; do
+            if [[ ${index} = ${send_hostpoolfs}* ]] ; then
+                send_datasets[${send_hostpoolfs}]="${send_datasets[${send_hostpoolfs}]} ${index}"
+            fi
+        done
+    done
+    # echo send_hostpoolfss="${send_hostpoolfss}"
+    declare -A recv_datasets
+    for recv_host_pool in ${recv_host_pools} ; do
+        recv_host=${recv_host_pool%:*}
+        recv_pool=${recv_host_pool##*:}
+        # ${recv_zpoolfs}${send_zfs}
+        for index in ${send_hostpoolfss} ; do
+            for send_hostpoolfs in ${send_datasets[${index}]} ; do
+                send_host=${send_hostpoolfs%:*}
+                send_zpoolfs=${send_hostpoolfs##*:}
+                # echo recv_datasets[${recv_host_pool}]="${recv_datasets[${recv_host_pool}]} ${recv_pool}/${send_host}/${send_zpoolfs}"
+            done
+        done
+    done
+    
+    last_send_hostpoolfs="$(last ${send_hostpoolfss})"
     
     for curr_snapshot in $((send_snapshots;received_snapshots)|sort -u) ; do
         printf "%-*s|" $(lmax snapshot ${currsnap}) ${curr_snapshot}
-	last_send_hostpoolfs="$(last ${send_hostpoolfss})"
         for send_hostpoolfs in ${send_hostpoolfss} ; do
-            if [ "$(for snapshot in ${send_snapshots[${send_hostpoolfs}]} ; do \
-                       echo ${snapshot} ; \
-                   done \
-                 | grep ${curr_snapshot})" != "" ] ; then
-                volume_stat="X"
+            has_gap=""
+            volume_stat="-"
+            for send_dataset in ${send_datasets[${send_hostpoolfs}]} ; do
+                foundss=""
+                for snapshot in ${host_snapshots[${send_dataset}]} ; do
+                    if [ ${curr_snapshot} = ${snapshot} ] ; then
+                        foundss=${snapshot}
+                    fi
+                done
+                if [ "${foundss}" = "" ] ; then
+                    has_gap="G"
+                else
+                    volume_stat="X"
+                fi
+            done
+            if [ "${volume_stat}" = "X" ] ; then
                 for dropsnap in ${send_dropsnaps[${send_hostpoolfs}]} ; do
                     if [ "${dropsnap}" = "${curr_snapshot}" ] ; then
                         volume_stat="D"
@@ -1222,45 +1260,76 @@ show_history () {
                         volume_stat="U"
                     fi
                 done
-            else
-                volume_stat="-"
+                if [ "${volume_stat}" = "X" ] && [ "${has_gap}" = "G" ] ; then
+                    volume_stat="?"
+                fi
             fi
-	    if [ "${last_send_hostpoolfs}" = "${send_hostpoolfs}" ] ; then
-		printf "%-1s" "${volume_stat}"
-	    else
-		printf "%-2s" "${volume_stat}"
-	    fi
+            if [ "${last_send_hostpoolfs}" = "${send_hostpoolfs}" ] ; then
+                printf "%-1s" "${volume_stat}"
+            else
+                printf "%-2s" "${volume_stat}"
+            fi
         done
         printf "|"
-	last_recv_host_pool="$(last ${recv_host_pools})"
+        last_recv_host_pool="$(last ${recv_host_pools})"
         for recv_host_pool in ${recv_host_pools} ; do
             recv_host=${recv_host_pool%:*}
             recv_pool=${recv_host_pool##*:}
-            if [ "$(cat data/${recv_host}_${recv_pool}.dat|grep "${curr_snapshot}")" != "" ] ; then
-                volume_stat="X"
-                for dropsnap in ${recv_dropsnaps[${recv_host_pool}]} ; do
-                    if [ "${dropsnap}" = "${curr_snapshot}" ] ; then
-                        volume_stat="D"
+            has_gap=""
+            volume_stat="-"
+            for send_hostpoolfs in ${send_hostpoolfss} ; do
+                for send_dataset in ${send_datasets[${send_hostpoolfs}]} ; do
+                    send_host=${send_dataset%:*}
+                    send_zpoolfs=${send_dataset##*:}
+                    recv_dataset=${recv_host_pool}/${send_host}/${send_zpoolfs}
+                    foundss=""
+                    # echo "host_snapshots[${recv_dataset}]"="${host_snapshots[${recv_dataset}]}"
+                    for snapshot in ${host_snapshots[${recv_dataset}]} ; do
+                        if [ ${curr_snapshot} = ${snapshot} ] ; then
+                            foundss=${snapshot}
+                        fi
+                    done
+                    if [ "${foundss}" = "" ] ; then
+                        has_gap="G"
+                    else
+                        volume_stat="X"
                     fi
+                done
+            done
+            if [ "${has_gap}" = "G" ] && \
+                   [ "${volume_stat}" = "-" ] && \
+                   [ "${media_host_pool[${recv_host}:${recv_pool}]}" = "" ] && \
+                   [ "$(cat data/${recv_host}_${recv_pool}.dat|grep "${curr_snapshot}")" != "" ] ; then
+                volume_stat="F"
+            fi
+            
+            if [ "${volume_stat}" = "X" ] ; then
+                for send_hostpoolfs in ${send_hostpoolfss} ; do
+                    for dropsnap in ${send_dropsnaps[${send_hostpoolfs}]} ; do
+                        if [ "${dropsnap}" = "${curr_snapshot}" ] ; then
+                            volume_stat="D"
+                        fi
+                    done
                 done
                 for dropsnap in ${dropsnaps} ; do
                     if [ "${dropsnap}" = "${curr_snapshot}" ] ; then
                         volume_stat="U"
                     fi
                 done
-            else
-                volume_stat="-"
+                if [ "${volume_stat}" = "X" ] && [ "${has_gap}" = "G" ] ; then
+                    volume_stat="?"
+                fi
             fi
-	    if [ "${last_recv_host_pool}" = "${recv_host_pool}" ] ; then
-		printf "%-1s" "${volume_stat}"
-	    else
-		printf "%-2s" "${volume_stat}"
-	    fi
+            if [ "${last_recv_host_pool}" = "${recv_host_pool}" ] ; then
+                printf "%-1s" "${volume_stat}"
+            else
+                printf "%-2s" "${volume_stat}"
+            fi
         done
         printf "\n"
     done
     printf "\n"
-    echo "Note: X=present, D=to be deleted by smartretp, U=to be deleted by dropsnaps, -=not present"
+    echo "Note: X=present, F=offline, ?=incomplete, D=in smartretp, U=in dropsnaps, -=not present"
     printf "\n"
 }
 

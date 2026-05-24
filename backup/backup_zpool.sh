@@ -22,14 +22,14 @@ ziper () {
 }
 
 add_host_snapshot () {
-    host_snapshot[${1},${2}]=1
-    # host_snapshots[${1},${2%@*}]="${host_snapshots[${1},${2%@*}]} ${2##*@}"
-    host_snapshots[${1},${2%@*}]="$(( for i in ${host_snapshots[${1},${2%@*}]} ; do echo $i ; done ; echo ${2##*@} ) | sort -u)"
+    host_snapshot[${1}:${2}]=1
+    # host_snapshots[${1}:${2%@*}]="${host_snapshots[${1}:${2%@*}]} ${2##*@${snprefix}}"
+    host_snapshots[${1}:${2%@*}]="$(( for i in ${host_snapshots[${1}:${2%@*}]} ; do echo $i ; done ; echo ${2##*@${snprefix}} ) | sort -u)"
 }
 
 del_host_snapshot () {
-    host_snapshot[${1},${2}]=0
-    host_snapshots[${1},${2%@*}]="$(for i in ${host_snapshots[${1},${2%@*}]} ; do if [ ${i} != ${2##*@} ] ; then echo $i ; fi ; done)"
+    host_snapshot[${1}:${2}]=0
+    host_snapshots[${1}:${2%@*}]="$(for i in ${host_snapshots[${1}:${2%@*}]} ; do if [ ${i} != ${2##*@} ] ; then echo $i ; fi ; done)"
 }
 
 update_hosts_snapshots () {
@@ -44,7 +44,7 @@ update_hosts_snapshots () {
                    echo_sendhost ; \
              ) | sort -u)
     for index in ${!host_snapshots[@]} ; do
-        host_snapshots[${index}]="$(( for i in ${host_snapshots[${index}]} ; do echo $i ; done ; echo ${2##*@} ) | sort -u)"
+        host_snapshots[${index}]="$(( for i in ${host_snapshots[${index}]} ; do echo $i ; done ) | sort -u)"
     done
 }
 
@@ -59,14 +59,14 @@ update_host_snapshots () {
 }
 
 host_snapshot () {
-    # [ "${host_snapshot[${ssh_snap},${2}]}" = "1" ]
+    # [ "${host_snapshot[${ssh_snap}:${2}]}" = "1" ]
     [ "$(${1} zfs list -pHt snapshot -o name ${2} 2>/dev/null)" != "" ]
 }
 
 snapshot_zpool () {
     snapshot=${send_pool}${send_zfs}@${snprefix}${currsnap}
     if ! host_snapshot "${send_ssh}" "${snapshot}" ; then
-	dryer ${send_ssh} zfs snapshot -r ${snapshot}
+        dryer ${send_ssh} zfs snapshot -r ${snapshot}
         update_host_snapshots "${send_host}" "${send_ssh}" "${send_pool}${send_zfs}" "${snprefix}${currsnap}"
     fi
 }
@@ -89,7 +89,7 @@ destroy_snapshot_zpool () {
 }
 
 sendsnap0_zpool () {
-    echo "${host_snapshots[${send_host},${send_zpoolfs}]}"
+    echo "${host_snapshots[${send_host}:${send_zpoolfs}]}"
 }
 
 recvsnap0_zpool () {
@@ -97,12 +97,12 @@ recvsnap0_zpool () {
 }
 
 recvsnap0_zpool_clone () {
-    echo "${host_snapshots[${recv_host},${recv_zpoolfs}${send_zfs}]}"
+    echo "${host_snapshots[${recv_host}:${recv_zpoolfs}${send_zfs}]}"
 }
 
 recvsnap0_zpool_zdump () {
     ${recv_ssh} ls -p /mnt/${recv_pool}/crbackup${recv_zfs}${send_zfs} 2>/dev/null | grep -v /$ | \
-        sed -e 's:.*_\(.*\)\.ra[wzt]:'${snprefix}'\1:g'
+        sed -e 's:.*_\(.*\)\.ra[wzt]:\1:g'
 }
 
 zfs_prev_zpool () {
