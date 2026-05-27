@@ -332,13 +332,13 @@ destroy_snapshot () {
 
 destroy_send_dropsnap () {
     for dropsnap in $* ; do
-        destroy_snapshot "${send_host}" "${send_zpool}" "${send_uuid}" "${send_zfs}" "${snprefix}${dropsnap}"
+        destroy_snapshot "${send_host}" "${send_zpool}" "${send_uuid}" "${send_zfs}" "${dropsnap}"
     done
 }
 
 destroy_recv_dropsnap_clone () {
     for dropsnap in $* ; do
-        destroy_snapshot "${recv_host}" "${recv_zpool}" "${recv_uuid}" "${recv_zfs}${send_zfs}" "${snprefix}${dropsnap}"
+        destroy_snapshot "${recv_host}" "${recv_zpool}" "${recv_uuid}" "${recv_zfs}${send_zfs}" "${dropsnap}"
     done
 }
 

@@ -29,7 +29,7 @@ add_host_snapshot () {
 
 del_host_snapshot () {
     host_snapshot[${1}:${2}]=0
-    host_snapshots[${1}:${2%@*}]="$(for i in ${host_snapshots[${1}:${2%@*}]} ; do if [ ${i} != ${2##*@} ] ; then echo $i ; fi ; done)"
+    host_snapshots[${1}:${2%@*}]="$(for i in ${host_snapshots[${1}:${2%@*}]} ; do if [ ${i} != ${2##*@${snprefix}} ] ; then echo $i ; fi ; done)"
 }
 
 update_hosts_snapshots () {
@@ -73,7 +73,7 @@ snapshot_zpool () {
 
 zfs_destroy () {
     ssh_snap="$(ssh_host ${1})"
-    snapshot="${2}@${3}"
+    snapshot="${2}@${snprefix}${3}"
     if host_snapshot "${ssh_snap}" "${snapshot}" ; then
         dryer ${ssh_snap} zfs destroy "${snapshot}" 2>/dev/null < /dev/null || true
 	# Next line is disabled in dry runs to avoid removal of the
