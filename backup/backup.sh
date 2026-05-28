@@ -1201,7 +1201,8 @@ show_history () {
 
     if [ "${smartretp}" = 1 ] ; then
 	for send_hostpoolfs in ${send_hostpoolfss} ; do
-	    send_dropsnaps[${send_hostpoolfs}]="$(smartretp_snap ${send_snapshots[${send_hostpoolfs}]})"
+            sendsnap=$(echo "${send_snapshots[${send_hostpoolfs}]}"|tail -n +2|head -n -2)
+	    send_dropsnaps[${send_hostpoolfs}]="$(smartretp_snap ${sendsnap})"
 	done
     fi
     
