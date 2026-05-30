@@ -1,5 +1,5 @@
 # Machine specific configuration:
-USERNAME=admin
+USERNAME=admin1
 FULLNAME="Administrative Account"
 DESTNAME=debian1
 DOMAIN=localdomain
@@ -27,7 +27,7 @@ PROXMOX=boot
 
 # APT Cache Server, leave it empty to disable:
 # APTCACHER=192.168.1.6
-APTCACHER=10.8.0.1
+# APTCACHER=10.8.0.1
 
 # Specifies if the machine is encrypted.  In an enterprise environment always
 # choose luks, since zfs only encrypts the file content but not the structure.
@@ -40,13 +40,13 @@ APTCACHER=10.8.0.1
 # dependency.  In any case, the luks partition can be the swap, which must be
 # defined out of the pool.
 
-# ENCRYPT=
 # ENCRYPT=zfs
-ENCRYPT=luks
+# ENCRYPT=luks
+ENCRYPT=
 
 # Enable compression
 # COMPRESSION=
-COMPRESSION=yes
+# COMPRESSION=yes
 
 # TANG Server, leave it empty to disable:
 # TANGSERV=10.8.0.2
@@ -63,7 +63,7 @@ AUTH_KEY=id_rsa.pub
 # Extra packages you want to install, leave empty for a small footprint
 # ntp is compulsory for services that require precise date/time (i.e., AD)
 
-DEBPACKS="ntp acl binutils build-essential openssh-server emacs"
+DEBPACKS="chrony acl vlan binutils build-essential openssh-server emacs"
 # DEBPACKS+=" firefox-esr gparted mtools"
 # DEBPACKS+=" kde-plasma-desktop task-kde-desktop"
 # Equivalent to live xfce4 installation + some tools
@@ -110,7 +110,8 @@ BOOTFS=zfs
 # Root partition size, 0 for max available space, minimum ~20GB
 # ROOTSIZE=+32G
 # ROOTSIZE=+32G
-ROOTSIZE=+64G
+# ROOTSIZE=+64G
+ROOTSIZE=0
 
 # root partition file system to be used
 # ROOTFS=ext4

@@ -86,9 +86,10 @@ make_biospar () {
 
 make_uefipar () {
     # UEFI booting:
-    sgdisk -n${UEFISUFF}:1M:${UEFISIZE} -t${UEFISUFF}:EF00 $1
+    sgdisk -n${UEFISUFF}:1M:${UEFISIZE} -t${UEFISUFF}:EF00 -c${UEFISUFF}:"EFI System Partition" $1
+    partprobe ${1}`psep ${1}`${UEFISUFF}
     # NOTE: Required even for proxmox, don't oversmart this script ;)
-    mkdosfs -F 32 -s 1 -n EFI ${1}`psep ${1}`${UEFISUFF}
+    mkfs.vfat -F 32 -n EFI ${1}`psep ${1}`${UEFISUFF}
 }
 
 do_make_biosuefipar () {
@@ -123,7 +124,7 @@ skip_if_bootpart () {
 }
 
 skip_if_proxmox () {
-    if [ "${PROXMOX}" == "" ] ; then
+    if [ "${PROXMOX}" = "" ] ; then
         $*
     fi
 }
@@ -794,22 +795,31 @@ encrypt_partitions () {
 setup_aptinstall () {
     setup_nonfree
     if [ "${DISTRO}" != ubuntu ] ; then
+	if [ "${PROXMOX}" = "" ] ; then
+            DSPX=""
+	    ZFSAPTOPTS="-t stable-backports"
+	    MOREPACKS="linux-headers-amd64"
+	else
+	    DSPX="# "
+	    ZFSAPTOPTS=""
+	fi
         rm -f /etc/apt/sources.list.d/ceph.list
         cat <<'EOF' | sed -e s:'<VERSNAME>':"${VERSNAME}":g \
                           -e s:'<NONFREE>':"${NONFREE}":g \
+			  -e s:'<DSPX>':"${DSPX}":g \
                           > /etc/apt/sources.list
 deb http://deb.debian.org/debian/ <VERSNAME> main contrib <NONFREE>
 deb-src http://deb.debian.org/debian/ <VERSNAME> main contrib <NONFREE>
+<DSPX>deb http://deb.debian.org/debian/ <VERSNAME>-backports main contrib <NONFREE>
 # deb [trusted=yes] file:/run/live/medium <VERSNAME> main <NONFREE>
 EOF
     fi
     # echo "deb http://deb.debian.org/debian ${VERSNAME}-backports main contrib" >> /etc/apt/sources.list
     apt-get update --yes
-    INSPACKS="debootstrap curl net-tools efibootmgr"
+    apt-get install --yes debootstrap curl net-tools efibootmgr gdisk ${MOREPACKS}
     if [ "${ROOTFS}" == zfs ] ; then
-        INSPACKS+=" zfsutils-linux"
+	apt-get install --yes ${ZFSAPTOPTS} zfsutils-linux
     fi
-    apt-get install --yes ${INSPACKS}
 }
 
 config_nic () {
@@ -964,35 +974,43 @@ unmount_partitions () {
 }
 
 config_grubip () {
-    cp /etc/default/grub /tmp/
-    # in some systems, in /etc/default/grub, a line like this could be required:
-    sed -e 's/GRUB_CMDLINE_LINUX=""/GRUB_CMDLINE_LINUX="'"ip=$IP::$GW:$MK"'"/g' /tmp/grub \
-        > /etc/default/grub
+    if [ -f /etc/default/grub ] ; then
+	cp /etc/default/grub /tmp/
+	# in some systems, in /etc/default/grub, a line like this could be required:
+	sed -e 's/GRUB_CMDLINE_LINUX=""/GRUB_CMDLINE_LINUX="'"ip=$IP::$GW:$MK"'"/g' /tmp/grub \
+            > /etc/default/grub
+    fi
 }
 
 remove_grubip () {
-    cp /etc/default/grub /tmp/
-    # in some systems, in /etc/default/grub, a line like this could be required:
-    sed -e 's/GRUB_CMDLINE_LINUX="'"ip=$IP::$GW:$MK"'"/GRUB_CMDLINE_LINUX=""/g' /tmp/grub \
-        > /etc/default/grub
+    if [ -f /etc/default/grub ] ; then
+	cp /etc/default/grub /tmp/
+	# in some systems, in /etc/default/grub, a line like this could be required:
+	sed -e 's/GRUB_CMDLINE_LINUX="'"ip=$IP::$GW:$MK"'"/GRUB_CMDLINE_LINUX=""/g' /tmp/grub \
+            > /etc/default/grub
+    fi
 }
 
 config_grubenc () {
     # in some systems, in /etc/default/grub, a line like this could be required:
-    if [ "`cat /etc/default/grub|grep GRUB_ENABLE_CRYPTODISK`" = "" ] ; then
-        echo "GRUB_ENABLE_CRYPTODISK=y" >>/etc/default/grub
-    else
-        cp /etc/default/grub /tmp/
-        sed -e 's/GRUB_ENABLE_CRYPTODISK=.*/GRUB_ENABLE_CRYPTODISK=""/g' /tmp/grub \
-            > /etc/default/grub
+    if [ -f /etc/default/grub ] ; then
+	if [ "`cat /etc/default/grub|grep GRUB_ENABLE_CRYPTODISK`" = "" ] ; then
+            echo "GRUB_ENABLE_CRYPTODISK=y" >>/etc/default/grub
+	else
+            cp /etc/default/grub /tmp/
+            sed -e 's/GRUB_ENABLE_CRYPTODISK=.*/GRUB_ENABLE_CRYPTODISK=""/g' /tmp/grub \
+		> /etc/default/grub
+	fi
     fi
 }
 
 remove_grubenc () {
     # in some systems, in /etc/default/grub, a line like this could be required:
-    cp /etc/default/grub /tmp/
-    sed -e 's/GRUB_ENABLE_CRYPTODISK=.*/GRUB_ENABLE_CRYPTODISK=""/g' /tmp/grub \
-        > /etc/default/grub
+    if [ -f /etc/default/grub ] ; then
+	cp /etc/default/grub /tmp/
+	sed -e 's/GRUB_ENABLE_CRYPTODISK=.*/GRUB_ENABLE_CRYPTODISK=""/g' /tmp/grub \
+            > /etc/default/grub
+    fi
 }
 
 config_boot_efi () {
@@ -1004,7 +1022,8 @@ config_boot_efi () {
 }
 
 config_boot () {
-    if [ "$EFI_" == "0" ]; then
+    EFI_=$(efibootmgr -q > /dev/null 2>&1 && echo 1 || echo 0)
+    if [ "$EFI_" = "0" ]; then
         # FOR BIOS:
         apt-get install --yes grub-pc
         grub-install $DISK
@@ -1521,7 +1540,6 @@ recheck_tpmversion () {
 DEPLOYDIR=${ROOTDIR}/home/${USERNAME}/deploy
 
 config_chroot () {
-    export EFI_=$(efibootmgr -q > /dev/null 2>&1 && echo 1 || echo 0)
     if [ "`realpath $0`" != "${DEPLOYDIR}/deploy.sh" ] ; then
         mkdir -p ${DEPLOYDIR}
         if [ -f "${AUTH_KEY}" ] ; then
@@ -1559,8 +1577,12 @@ config_kernel_cmdline () {
 update_boot_proxmox () {
     if_zfs config_kernel_cmdline
     rm -f /etc/kernel/proxmox-boot-uuids
+    if [ "$EFI_" = "0" ]; then
+        PBTOPT=grub
+    fi
     # proxmox-boot-tool clean # this will fail, don't use during installation
-    proxmox-boot-tool init ${UEFIPART}
+    # proxmox-boot-tool format ${UEFIPART}
+    proxmox-boot-tool init ${UEFIPART} ${PBTOPT}
 }
 
 update_boot () {
@@ -1613,6 +1635,7 @@ chroot_install () {
         if_raid \
         apt-get install --yes mdadm
     config_fstab
+    config_boot
     if_encrypt \
         inspkg_encryption
     config_pcr_bank
@@ -1632,7 +1655,6 @@ chroot_install () {
     if_zfs \
         if_bootpart \
         config_zfs_bpool
-    config_boot
     update_boot
     apt update
     apt --yes full-upgrade
@@ -1684,7 +1706,8 @@ prepare_partitions () {
     fi
     apt update
     if_zfs check_prereq
-    if_encrypt apt install --yes cryptsetup
+    # crypsetup always required because of warn_confirm:
+    apt install --yes cryptsetup
     show_settings
     warn_confirm
     if_else_resuming \
@@ -1777,7 +1800,7 @@ rescue () {
     if_live \
         setup_aptinstall
     apt update
-    if_encrypt apt install --yes cryptsetup
+    apt install --yes cryptsetup
     ask_key
     config_aptcacher
     open_partitions
