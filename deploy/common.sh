@@ -131,7 +131,7 @@ if_else_proxmox () {
 }
 
 config_instpacks_debian () {
-    INIPACKS+=" linux-image-`dpkg --print-architecture`"
+    INIPACKS+=" linux-image-$(dpkg --print-architecture)"
 }
 
 config_instpacks_proxmox_boot () {
@@ -143,7 +143,7 @@ config_instpacks_proxmox_full () {
 }
 
 config_instpacks_proxmox () {
-    INIPACKS+=" systemd-boot proxmox-kernel-7.0 proxmox-kernel-helper"
+    INIPACKS+=" systemd-boot proxmox-kernel-7.0 proxmox-kernel-helper proxmox-archive-keyring"
     config_instpacks_proxmox_${PROXMOX}
 }
 
@@ -155,14 +155,20 @@ config_reconfig_ubuntu () {
     dpkg-reconfigure locales tzdata keyboard-configuration console-setup
 }
 
-config_instpacks_zfs () {
-    INIPACKS+=" zfsutils-linux zfs-initramfs"
-}
-
 if_zfs () {
-    if [ "${ROOTFS}" == zfs ] || [ "${BOOTFS}" == zfs ] ; then
+    if [ "${ROOTFS}" = zfs ] || [ "${BOOTFS}" = zfs ] ; then
         $*
     fi
+}
+
+install_zfs () {
+    APTOPTS=""
+    if [ "${DISTRO}" != ubuntu ] && \
+           [ "${PROXMOX}" = "" ] ; then
+        APTOPTS="-t stable-backports"
+    fi
+    apt-get install --yes linux-headers-$(dpkg --print-architecture)
+    apt-get install --yes ${APTOPTS} zfsutils-linux zfsutils-linux zfs-initramfs
 }
 
 config_instpacks () {
@@ -173,7 +179,6 @@ config_instpacks () {
     if [ "$(dmidecode -s system-manufacturer)" == "QEMU" ] ; then
         INIPACKS+=" qemu-guest-agent"
     fi
-    if_zfs config_instpacks_zfs
     INIPACKS+=" sudo btrfs-progs"
     if [ "$DISTRO" == "debian" ] ; then
         INIPACKS+=" debconf-utils"
@@ -183,6 +188,7 @@ config_instpacks () {
     elif [ "$DISTRO" == "ubuntu" ] ; then
         INIPACKS+=" debconf-i18n linux-image-generic"
     fi
+    if_zfs install_zfs
     echo "Installing basic packages"
     apt-get install --yes $INIPACKS
     echo "Installing extra packages"

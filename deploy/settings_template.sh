@@ -1,7 +1,7 @@
 # Machine specific configuration:
 USERNAME=admin1
 FULLNAME="Administrative Account"
-DESTNAME=debian1
+DESTNAME=$(hostname)
 DOMAIN=localdomain
 
 # Distributon.
@@ -13,6 +13,11 @@ DISTRO=debian
 # VERSNAME=bookworm
 VERSNAME=trixie
 
+# Help the installer decide if we are going to use a dhcp or an static ip but
+# note that during the installation we will get the ip from the dhcp.
+# Recommented value is yes for servers, no for clients.
+USE_DHCP=no
+
 # Ubuntu versions
 # VERSNAME=focal
 # VERSNAME=jammy
@@ -21,13 +26,13 @@ VERSNAME=trixie
 # the boot utils.  Note: you must choose PROXMOX=boot if you want to use zfs.
 # Leave it emtpy to skip proxmox installation.
 
-# PROXMOX=
+PROXMOX=
 # PROXMOX=full
-PROXMOX=boot
+# PROXMOX=boot
 
 # APT Cache Server, leave it empty to disable:
 # APTCACHER=192.168.1.6
-# APTCACHER=10.8.0.1
+APTCACHER=10.8.0.1
 
 # Specifies if the machine is encrypted.  In an enterprise environment always
 # choose luks, since zfs only encrypts the file content but not the structure.

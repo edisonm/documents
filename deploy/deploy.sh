@@ -2,7 +2,7 @@
 
 . `dirname $0`/common.sh
 
-# set -x
+set -e
 
 # 2021-05-03 by Edison Mera
 
@@ -797,11 +797,8 @@ setup_aptinstall () {
     if [ "${DISTRO}" != ubuntu ] ; then
 	if [ "${PROXMOX}" = "" ] ; then
             DSPX=""
-	    ZFSAPTOPTS="-t stable-backports"
-	    MOREPACKS="linux-headers-amd64"
 	else
 	    DSPX="# "
-	    ZFSAPTOPTS=""
 	fi
         rm -f /etc/apt/sources.list.d/ceph.list
         cat <<'EOF' | sed -e s:'<VERSNAME>':"${VERSNAME}":g \
@@ -816,10 +813,8 @@ EOF
     fi
     # echo "deb http://deb.debian.org/debian ${VERSNAME}-backports main contrib" >> /etc/apt/sources.list
     apt-get update --yes
-    apt-get install --yes debootstrap curl net-tools efibootmgr gdisk ${MOREPACKS}
-    if [ "${ROOTFS}" == zfs ] ; then
-	apt-get install --yes ${ZFSAPTOPTS} zfsutils-linux
-    fi
+    apt-get install --yes debootstrap curl net-tools efibootmgr gdisk
+    if_zfs install_zfs
 }
 
 config_nic () {
@@ -848,13 +843,19 @@ EOF
         if [ "$nic" != "lo" ] && [ "$nic" != "bonding_masters" ] ; then
             echo
             echo "allow-hotplug $nic"
-            echo "iface $nic inet manual"
+            if [ "${USE_DCHP}" = no ] ; then
+                echo "iface $nic inet manual"
+            else
+                echo "iface $nic inet dhcp"
+            fi
             BRIDGE_PORTS="${BRIDGE_PORTS} ${nic}"
         fi
     done
-    cat <<'EOF' | sed -e s:'<FIRSTIP>':"${IP}":g \
-                      -e s:'<GATEWAY>':"${GW}":g \
-                      -e s:'<BRIDGE_PORTS>':"${BRIDGE_PORTS}":g
+    
+    if [ "${USE_DCHP}" = no ] ; then
+        cat <<'EOF' | sed -e s:'<FIRSTIP>':"${IP}":g \
+                          -e s:'<GATEWAY>':"${GW}":g \
+                          -e s:'<BRIDGE_PORTS>':"${BRIDGE_PORTS}":g
 
 auto vmbr0
 iface vmbr0 inet static
@@ -868,6 +869,7 @@ iface vmbr0 inet static
 	bridge-maxwait 0
 	timeout 15
 EOF
+    fi
 }
 
 config_hostname () {
@@ -876,7 +878,9 @@ config_hostname () {
       echo "::1		localhost ip6-localhost ip6-loopback" ; \
       echo "ff02::1		ip6-allnodes" ; \
       echo "ff02::2		ip6-allrouters" ; \
-      echo "${IP}	${DESTNAME}.${DOMAIN} ${DESTNAME}" ; \
+      if [ "${USE_DCHP}" = no ] ; then echo "${IP}	${DESTNAME}.${DOMAIN} ${DESTNAME}" ; \
+      else  echo "127.0.1.1	${DESTNAME}.${DOMAIN} ${DESTNAME}" ; \
+      fi ; \
       ) > /etc/hosts
 }
 
@@ -1706,7 +1710,7 @@ prepare_partitions () {
     fi
     apt update
     if_zfs check_prereq
-    # crypsetup always required because of warn_confirm:
+    # crypsetup always required because of ask_pass:
     apt install --yes cryptsetup
     show_settings
     warn_confirm
@@ -1715,6 +1719,7 @@ prepare_partitions () {
         set_key
     config_aptcacher
     setup_aptinstall
+    if_zfs install_zfs
     if_else_resuming \
         reopen_partitions \
         create_partitions_${DISKLAYOUT}
@@ -1769,23 +1774,28 @@ install_encryption () {
         encrypt_partitions ${SWAPPDEVS}
 }
 
+tracked () {
+    trackid=$1
+    shift
+    if ! [ -f trackid.txt ] || [ $((${trackid}>$(cat trackid.txt))) != 0 ] ; then
+        $*
+        echo ${trackid} > trackid.txt
+    fi
+}
+
 install () {
-    prepare_partitions
-    exec_once \
-        unpack_distro
-    setup_apt
-    skip_if_resuming \
-        install_encryption
-    bind_dirs
-    config_chroot
-    if_zfs cp_zpool_cache
-    if_zfs \
-        if_bootpart \
-        setup_zfs_bpool
-    run_chroot /home/${USERNAME}/deploy/deploy.sh chroot_install
-    unbind_dirs
-    unmount_partitions
-    close_partitions
+    tracked  1 prepare_partitions
+    tracked  2 exec_once unpack_distro
+    tracked  3 setup_apt
+    tracked  4 skip_if_resuming install_encryption
+    tracked  5 bind_dirs
+    tracked  6 config_chroot
+    tracked  7 if_zfs cp_zpool_cache
+    tracked  8 if_zfs if_bootpart setup_zfs_bpool
+    tracked  9 run_chroot /home/${USERNAME}/deploy/deploy.sh chroot_install
+    tracked 10 unbind_dirs
+    tracked 11 unmount_partitions
+    tracked 12 close_partitions
 }
 
 if_live () {
