@@ -201,7 +201,7 @@ config_instpacks () {
     apt-get --yes install initramfs-tools efibootmgr
     config_reconfig_${DISTRO}
     INIPACKS=""
-    BAKPACKS=""
+    BAKPACKS="curl"
     add_krn_bakpacks linux-headers-$(dpkg --print-architecture)
     if [ "$(dmidecode -s system-manufacturer)" == "QEMU" ] ; then
         INIPACKS+=" qemu-guest-agent"

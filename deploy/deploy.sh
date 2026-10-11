@@ -93,13 +93,36 @@ make_biospar () {
 
 make_uefipar () {
     # UEFI booting:
-    sgdisk -n${UEFISUFF}:1M:${UEFISIZE} -t${UEFISUFF}:EF00 -c${UEFISUFF}:"EFI System Partition" $1
-    partprobe ${1}
-    sleep 1
-    # NOTE: Required even for proxmox, don't oversmart this script ;)
-    mkfs.vfat -F 32 -n EFI ${1}`psep ${1}`${UEFISUFF}
-    partprobe ${1}
-    sleep 1
+    if [ ! -b ${1}`psep ${1}`${UEFISUFF} ] ; then
+        sgdisk -n${UEFISUFF}:1M:${UEFISIZE} -t${UEFISUFF}:EF00 -c${UEFISUFF}:"EFI System Partition" $1
+        partprobe ${1}
+        sleep 1
+        # NOTE: Required even for proxmox, don't oversmart this script ;)
+        mkfs.vfat -F 32 -n EFI ${1}`psep ${1}`${UEFISUFF}
+        partprobe ${1}
+        sleep 1
+    fi
+    
+    if [ "${MOK_RESTART_REQUIRED}" = 1 ] ; then
+        
+        ROOTDIR="" mount_epartitions
+        apt install --yes shim-signed
+        mkdir -p /boot/efi/EFI/debian
+
+        cp /usr/lib/shim/shimx64.efi.signed \
+           /boot/efi/EFI/debian/shimx64.efi
+        
+        cp /usr/lib/shim/mmx64.efi.signed \
+           /boot/efi/EFI/debian/mmx64.efi
+        
+        efibootmgr -c -d ${1} -p ${UEFISUFF} -L "debian" -l '\EFI\debian\shimx64.efi'
+        
+        ROOTDIR="" unmount_epartitions
+        echo
+        echo "Restart the system, enroll the MOK keys and"
+        echo "execute the installation again to continue"
+        exit 1
+    fi
 }
 
 do_make_biosuefipar () {
@@ -185,22 +208,31 @@ if_else_uefi () {
     fi
 }
 
+make_partition () {
+    if [ ! -b ${1}`psep ${1}`${2} ] ; then
+        sgdisk -n${2}:0:${3} -t${2}:8300 ${1}
+    fi
+}
+
+make_partition_end () {
+    if [ ! -b ${1}`psep ${1}`${2} ] ; then
+        sgdisk -n${2}:${3}:0 -t${2}:8300 ${1}
+    fi
+}
+
 do_make_partitions () {
     # Boot patition:
-    if_bootpart \
-        sgdisk -n${BOOTSUFF}:0:${BOOTSIZE} -t${BOOTSUFF}:8300 $1
+    if_bootpart make_partition ${1} ${BOOTSUFF} ${BOOTSIZE}
 
     if [ "${SWAP_AT_THE_END}" = 1 ] ; then
-        if_swappart \
-            sgdisk     -n${SWAPSUFF}:${SWAPSIZE}:0 -t${SWAPSUFF}:8300 $1
+        if_swappart make_partition_end ${1} ${SWAPSUFF} ${SWAPSIZE}
     fi
     
     # Root partition:
-    sgdisk     -n${ROOTSUFF}:0:${ROOTSIZE} -t${ROOTSUFF}:8300 $1
+    make_partition ${1} ${ROOTSUFF} ${ROOTSIZE}
 
     if [ "${SWAP_AT_THE_END}" != 1 ] ; then
-        if_swappart \
-            sgdisk     -n${SWAPSUFF}:0:${SWAPSIZE} -t${SWAPSUFF}:8300 $1
+        if_swappart make_partition ${1} ${SWAPSUFF} ${SWAPSIZE}
     fi
 }
 
@@ -520,15 +552,17 @@ do_bootparts () {
 }
 
 create_partitions_common () {
-    if [ "${WIPEOUT}" == yes ] ; then
+    if [ "${WIPEOUT}" == yes ] && \
+           ( [ "${MOK_RESTART_REQUIRED}" = 1 ] || \
+                 [ "${MOK_RESTART_REQUIRED}" = "" ] ) ; then
         # First, wipeout the disks:
         for DISK in ${DISKS} ; do
             skip_if_resuming sgdisk -o $DISK
         done
+        partprobe
+        sleep 1
     fi
 
-    partprobe
-    sleep 1
     for DISK in ${DISKS} ; do
         make_biosuefipar $DISK
         make_partitions $DISK
@@ -606,7 +640,8 @@ close_partitions () {
 
 crypt_partitions () {
     for PDEV in $* ; do
-        printf "%s" "$KEY_"|cryptsetup luksFormat --sector-size=4096 --key-file - ${PDEV}
+        # --sector-size=4096
+        printf "%s" "$KEY_"|cryptsetup luksFormat --key-file - ${PDEV}
     done
 }
 
@@ -656,6 +691,8 @@ fi
 if [ "${COMPRESSION}" == yes ] ; then
     COMPZFS="-O compression=on"
     COMPBTRFS="compress,"
+else
+    COMPZFS="-O compression=off"
 fi
 
 build_bootpart_zfs () {
@@ -817,8 +854,7 @@ EOF
     fi
     # echo "deb http://deb.debian.org/debian ${VERSNAME}-backports main contrib" >> /etc/apt/sources.list
     apt-get update --yes
-    apt-get install --yes debootstrap curl net-tools efibootmgr gdisk
-    if_zfs install_zfs
+    apt-get install --yes debootstrap net-tools curl
 }
 
 config_nic () {
@@ -1698,21 +1734,30 @@ fix_tpm () {
     update-initramfs -c -k all
 }
 
+# note that MOK_RESTART_REQUIRED can have 3 values: empty, 0 or 1, and each one
+# means something different:
+MOK_RESTART_REQUIRED=
+
 check_prereq () {
-    apt update
     apt install --yes mokutil
-    # It is impossible to install zfs with debian and secure boot enabled
-    # because zfs will require to compile a kernel module (via dkms), and
-    # will not be signed with an enrolled key, and to enroll the keys you
-    # need to restart the PC, going back to the starting point.
-    # So this is not something we didn't implement, but that currently
-    # can not be done in Debian during installation:
     if [ "`mokutil --sb-state`" == "SecureBoot enabled" ] \
            && [ "${DISTRO}" == debian ] \
            && [ "`uname -r|grep pve`" == "" ] ; then
-        echo "ERROR: Installing a zfs file system with SecureBoot enabled is not supported"
-        echo "ERROR: Disable it to continue (you can enable it later if you really need)"
-        exit 1
+        MOK_RESTART_REQUIRED=0
+        apt update
+        cp mok/mok.key mok/mok.pub /var/lib/dkms/
+        if mokutil --test-key /var/lib/dkms/mok.pub >/dev/null 2>&1 ; then
+            echo "MOK not enrolled yet, but required for zfs/Debian"
+            mokutil --import /var/lib/dkms/mok.pub
+            MOK_RESTART_REQUIRED=1
+        else
+            if [ $(mokutil --test-key /var/lib/dkms/mok.pub | grep request) != "" ] ; then
+                MOK_RESTART_REQUIRED=1
+                echo "MOK not enrolled yet, but requested"
+            else
+                echo "MOK enrolled, continuing with the installation"
+            fi
+        fi
     fi
 }
 
@@ -1722,21 +1767,25 @@ prepare_partitions () {
     fi
     apt update
     if_zfs check_prereq
-    # crypsetup always required because of ask_pass:
-    apt install --yes cryptsetup
+    # next packages are always required early in the install process, so don't
+    # do fancy stuff, just install them right away with simple commands:
+    apt install --yes cryptsetup gdisk efibootmgr
     show_settings
     warn_confirm
-    if_else_resuming \
-        ask_key \
-        set_key
-    config_aptcacher
-    setup_aptinstall
+    if [ "${MOK_RESTART_REQUIRED}" != 1 ] ; then
+        if_else_resuming \
+            ask_key \
+            set_key
+    fi
     if_else_resuming \
         reopen_partitions \
         create_partitions_${DISKLAYOUT}
+    config_aptcacher
+    setup_aptinstall
     skip_if_resuming \
         if_encrypt_luks \
         crypt_partitions ${ROOTPDEVS}
+    if_zfs install_zfs
     skip_if_resuming \
         if_encrypt \
         crypt_partitions ${SWAPPDEVS}
@@ -1794,6 +1843,11 @@ tracked () {
     fi
 }
 
+cp_mok_keys () {
+    mkdir -p ${ROOTDIR}/var/lib/dkms/
+    cp mok/mok.key mok/mok.pub ${ROOTDIR}/var/lib/dkms/
+}
+
 install () {
     tracked  1 prepare_partitions
     tracked  2 exec_once unpack_distro
@@ -1803,10 +1857,11 @@ install () {
     tracked  6 config_chroot
     tracked  7 if_zfs cp_zpool_cache
     tracked  8 if_zfs if_bootpart setup_zfs_bpool
-    tracked  9 run_chroot /home/${USERNAME}/deploy/deploy.sh chroot_install
-    tracked 10 unbind_dirs
-    tracked 11 unmount_partitions
-    tracked 12 close_partitions
+    tracked  9 cp_mok_keys
+    tracked 10 run_chroot /home/${USERNAME}/deploy/deploy.sh chroot_install
+    tracked 11 unbind_dirs
+    tracked 12 unmount_partitions
+    tracked 13 close_partitions
 }
 
 if_live () {
@@ -1824,6 +1879,7 @@ rescue () {
     apt install --yes cryptsetup
     ask_key
     config_aptcacher
+    if_zfs install_zfs
     open_partitions
     mount_partitions
     bind_dirs
@@ -1873,7 +1929,7 @@ restore () {
 
 install_to () {
     if [ $# = 2 ] ; then
-        tar -c deploy.sh common.sh settings_template.sh \
+        tar -c deploy.sh common.sh settings_template.sh mok/mok.key mok/mok.pub \
             | ssh user@$1 "mkdir -p deploy ; \
               cd deploy ; \
               tar -x ; \
@@ -1884,6 +1940,20 @@ install_to () {
     else
         echo "Usage: $0 install_to IP HOSTNAME"
     fi
+}
+
+generate_mok () {
+    mkdir -p mok
+    openssl req \
+            -new \
+            -x509 \
+            -newkey rsa:4096 \
+            -keyout mok/mok.key \
+            -outform DER \
+            -out mok/mok.pub \
+            -nodes \
+            -days 36500 \
+            -subj "/CN=Custom DKMS Signing Key/"
 }
 
 if [ $# = 0 ] ; then

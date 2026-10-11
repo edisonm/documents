@@ -56,8 +56,8 @@ APTCACHER=10.8.0.1
 ENCRYPT=
 
 # Enable compression
-# COMPRESSION=
 # COMPRESSION=yes
+COMPRESSION=
 
 # TANG Server, leave it empty to disable:
 # TANGSERV=10.8.0.2
