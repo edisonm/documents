@@ -1,7 +1,5 @@
 #!/bin/bash
 
-set -e
-
 set_key () {
     echo "The master passphrase is used as failover decryption method and admin user password"
     export KEY_="$($ASKPASS_ "New password:")"
@@ -130,8 +128,16 @@ if_else_proxmox () {
     fi
 }
 
+add_krn_bakpacks () {
+    if [ "${KRN_BACKPORT}" = yes ] ; then
+        BAKPACKS+=" $*"
+    else
+        INIPACKS+=" $*"
+    fi
+}
+
 config_instpacks_debian () {
-    INIPACKS+=" linux-image-$(dpkg --print-architecture)"
+    add_krn_bakpacks linux-image-$(dpkg --print-architecture)
 }
 
 config_instpacks_proxmox_boot () {
@@ -161,21 +167,42 @@ if_zfs () {
     fi
 }
 
-install_zfs () {
-    APTOPTS=""
-    if [ "${DISTRO}" != ubuntu ] && \
+# place here initializations that require the variables in settings_<hostname>.sh
+init_commons () {
+    # Install the kernel and zfs from the backports
+    BAKOPTS=""
+    if [ "${DISTRO}" = debian ] && \
            [ "${PROXMOX}" = "" ] ; then
-        APTOPTS="-t stable-backports"
+        BAKOPTS="-t stable-backports"
     fi
+}
+
+add_zfs_bakpacks () {
+    if [ "${ZFS_BACKPORT}" = yes ] ; then
+        BAKPACKS+=" $*"
+    else
+        INIPACKS+=" $*"
+    fi
+}
+
+config_zfs () {
+    add_zfs_bakpacks zfsutils-linux zfsutils-linux zfs-initramfs
+}
+
+install_zfs () {
+    BAKPACKS=""
+    config_zfs
     apt-get install --yes linux-headers-$(dpkg --print-architecture)
-    apt-get install --yes ${APTOPTS} zfsutils-linux zfsutils-linux zfs-initramfs
+    apt-get install --yes ${BAKOPTS} ${BAKPACKS}
 }
 
 config_instpacks () {
     config_initpacks
-    apt-get --yes install initramfs-tools
+    apt-get --yes install initramfs-tools efibootmgr
     config_reconfig_${DISTRO}
-    INIPACKS="$*"
+    INIPACKS=""
+    BAKPACKS=""
+    add_krn_bakpacks linux-headers-$(dpkg --print-architecture)
     if [ "$(dmidecode -s system-manufacturer)" == "QEMU" ] ; then
         INIPACKS+=" qemu-guest-agent"
     fi
@@ -188,11 +215,13 @@ config_instpacks () {
     elif [ "$DISTRO" == "ubuntu" ] ; then
         INIPACKS+=" debconf-i18n linux-image-generic"
     fi
-    if_zfs install_zfs
+    if_zfs config_zfs
+    echo "Installing stable-backports packages"
+    apt-get install --yes ${BAKOPTS} ${BAKPACKS}
     echo "Installing basic packages"
-    apt-get install --yes $INIPACKS
+    apt-get install --yes ${INIPACKS}
     echo "Installing extra packages"
-    apt-get install --yes $DEBPACKS
+    apt-get install --yes ${DEBPACKS}
     # os-prober is needed only on dual-boot systems.
     # Placed at the end to make sure is uninstalled:
     if [ "${DISKLAYOUT}" != "dualboot" ] ; then

@@ -21,6 +21,11 @@ set -e
 # $ scp username@hostname:apps/documents/deploy/* ./
 # $ ./deploy.sh
 
+# if such host don't have access to client machines, then first install openssh-server,
+# make sure you have a user named 'user' and then execute from here:
+
+# $ ./deploy.sh install_to <IP>
+
 . `dirname $0`/settings_`hostname`.sh
 
 # hostname=${hostname:-`hostname`}
@@ -32,6 +37,8 @@ GW=$(ip route|awk '/default/{print $3}'|head -n1)
 
 export DEBIAN_FRONTEND=noninteractive
 ASKPASS_='/lib/cryptsetup/askpass'
+
+init_commons
 
 warn_confirm () {
     if [ "${RESUMING}" == "yes" ] ; then
@@ -87,9 +94,12 @@ make_biospar () {
 make_uefipar () {
     # UEFI booting:
     sgdisk -n${UEFISUFF}:1M:${UEFISIZE} -t${UEFISUFF}:EF00 -c${UEFISUFF}:"EFI System Partition" $1
-    partprobe ${1}`psep ${1}`${UEFISUFF}
+    partprobe ${1}
+    sleep 1
     # NOTE: Required even for proxmox, don't oversmart this script ;)
     mkfs.vfat -F 32 -n EFI ${1}`psep ${1}`${UEFISUFF}
+    partprobe ${1}
+    sleep 1
 }
 
 do_make_biosuefipar () {
@@ -795,19 +805,13 @@ encrypt_partitions () {
 setup_aptinstall () {
     setup_nonfree
     if [ "${DISTRO}" != ubuntu ] ; then
-	if [ "${PROXMOX}" = "" ] ; then
-            DSPX=""
-	else
-	    DSPX="# "
-	fi
         rm -f /etc/apt/sources.list.d/ceph.list
         cat <<'EOF' | sed -e s:'<VERSNAME>':"${VERSNAME}":g \
                           -e s:'<NONFREE>':"${NONFREE}":g \
-			  -e s:'<DSPX>':"${DSPX}":g \
                           > /etc/apt/sources.list
 deb http://deb.debian.org/debian/ <VERSNAME> main contrib <NONFREE>
 deb-src http://deb.debian.org/debian/ <VERSNAME> main contrib <NONFREE>
-<DSPX>deb http://deb.debian.org/debian/ <VERSNAME>-backports main contrib <NONFREE>
+deb http://deb.debian.org/debian/ <VERSNAME>-backports main contrib <NONFREE>
 # deb [trusted=yes] file:/run/live/medium <VERSNAME> main <NONFREE>
 EOF
     fi
@@ -1571,6 +1575,7 @@ show_settings () {
     echo ROOTPARTS=${ROOTPARTS}
     echo SWAPPDEVS=${SWAPPDEVS}
     echo SWAPPARTS=${SWAPPARTS}
+    echo BAKOPTS=${BAKOPTS}
     echo "Boot Mode: "`if_else_uefi "echo UEFI" "echo BIOS"`
 }
 
@@ -1696,10 +1701,17 @@ fix_tpm () {
 check_prereq () {
     apt update
     apt install --yes mokutil
+    # It is impossible to install zfs with debian and secure boot enabled
+    # because zfs will require to compile a kernel module (via dkms), and
+    # will not be signed with an enrolled key, and to enroll the keys you
+    # need to restart the PC, going back to the starting point.
+    # So this is not something we didn't implement, but that currently
+    # can not be done in Debian during installation:
     if [ "`mokutil --sb-state`" == "SecureBoot enabled" ] \
            && [ "${DISTRO}" == debian ] \
            && [ "`uname -r|grep pve`" == "" ] ; then
         echo "ERROR: Installing a zfs file system with SecureBoot enabled is not supported"
+        echo "ERROR: Disable it to continue (you can enable it later if you really need)"
         exit 1
     fi
 }
@@ -1719,7 +1731,6 @@ prepare_partitions () {
         set_key
     config_aptcacher
     setup_aptinstall
-    if_zfs install_zfs
     if_else_resuming \
         reopen_partitions \
         create_partitions_${DISKLAYOUT}
@@ -1858,6 +1869,21 @@ restore () {
     unbind_dirs
     unmount_partitions
     close_partitions
+}
+
+install_to () {
+    if [ $# = 2 ] ; then
+        tar -c deploy.sh common.sh settings_template.sh \
+            | ssh user@$1 "mkdir -p deploy ; \
+              cd deploy ; \
+              tar -x ; \
+              mv settings_template.sh settings_$2.sh ; \
+              sudo hostname $2"
+        echo "Scripts ready, now run the next command in the target machine:"
+        echo "cd deploy ; sudo ./deploy.sh"
+    else
+        echo "Usage: $0 install_to IP HOSTNAME"
+    fi
 }
 
 if [ $# = 0 ] ; then

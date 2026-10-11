@@ -8,6 +8,12 @@ DOMAIN=localdomain
 DISTRO=debian
 # DISTRO=ubuntu
 
+# Use the backport version of zfs, applies only if DISTRO=debian
+ZFS_BACKPORT=yes
+
+# Use the backport verson of the kernel, applies only if DISTRO=debian
+KRN_BACKPORT=yes
+
 # Debian versions
 # VERSNAME=bullseye
 # VERSNAME=bookworm
